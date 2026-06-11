@@ -30,7 +30,6 @@ export async function POST(request) {
     //    -> Bypass AI, ganti penamaan nama file ke "RESI_PASPOR - Nama" [40-42]
     // }
 
-    // --- MAPPING 15 KOLOM GOOGLE SHEETS MANIFEST ---
     const sheetValues = [];
     
     // Baris 1: Pendaftar Utama
