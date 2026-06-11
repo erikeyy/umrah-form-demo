@@ -296,6 +296,7 @@ export default function UmrahForm() {
                    </button>
                  )}
                  {/* --- AKHIR BLOK KELUARGA --- */}
+               </div>
            )}
 
            {/* Step 2: Validasi Kepemilikan Paspor Utama */}
@@ -381,5 +382,4 @@ export default function UmrahForm() {
       </div>
     </div>
   );
-}
 }
