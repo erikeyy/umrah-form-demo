@@ -1,0 +1,15 @@
+# Abaikan file environment
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Abaikan direktori dependensi dan environment virtual
+node_modules/
+venv/
+env/
+
+# Abaikan file konfigurasi sistem/IDE
+.DS_Store
+Thumbs.db
