@@ -1,10 +1,11 @@
 import { Suspense } from 'react';
-import UmrahForm from './components/UmrahForm'; // [17]
+import UmrahForm from './components/UmrahForm';
 
 export default function RegisterPage() {
   return (
-    <Suspense fallback={<div className="flex justify-center p-10">Loading Form...</div>}>
+    // Suspense akan mengamankan form yang membaca URL Parameter dari Error SSR
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center font-bold text-purple-600">Memuat Formulir Aman...</div>}>
       <UmrahForm />
     </Suspense>
   );
-} // [16]
+}
