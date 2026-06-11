@@ -13,3 +13,8 @@ env/
 # Abaikan file konfigurasi sistem/IDE
 .DS_Store
 Thumbs.db
+
+# Next.js build output
+.next/
+out/
+build/
