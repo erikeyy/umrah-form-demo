@@ -7,6 +7,7 @@ import { UploadCloud, CheckCircle2, AlertCircle, Plus, Trash2, ChevronRight, Che
 const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15MB
 const ACCEPTED_FILE_TYPES = ['image/jpeg', 'image/png', 'application/pdf'];
 const TOTAL_STEPS = 4;
+const MAX_FAMILY_MEMBERS = 4;
 const SERAGAM_OPTIONS = [
   { value: 'XS', label: 'XS', detail: 'LD 86-90 cm, panjang 64-66 cm' },
   { value: 'S', label: 'S', detail: 'LD 90-94 cm, panjang 66-68 cm' },
@@ -46,6 +47,9 @@ const normalizeParticipantData = (participant) => ({
   namaLengkap: cleanParticipantName(participant?.namaLengkap),
   noPaspor: participant?.noPaspor?.toUpperCase().replace(/[^A-Z0-9]/g, "") || "",
 });
+
+const isParticipantObject = (value) =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
 
 // Fungsi Validasi Masa Berlaku Paspor
 const isValidPassport = (dateString) => {
@@ -100,16 +104,18 @@ export default function UmrahForm() {
   };
 
   const addFamilyMember = () => {
-    if (family.length < 4) {
-      setFamily(prev => [...prev, {
-        id: Date.now(), namaLengkap: '', nik: '', hubungan: '',
+    setFamily(prev => {
+      if (prev.length >= MAX_FAMILY_MEMBERS) return prev;
+
+      return [...prev, {
+        id: `${Date.now()}-${prev.length}`, namaLengkap: '', nik: '', hubungan: '',
         noPaspor: '', pasporExpired: '', tanggalLahir: '',
         jenisKelamin: '', tempatLahir: '', statusPaspor: 'READY',
         hasPasporHal4: false,
         ukuranSeragam: '', perlengkapanIbadah: '',
         alamatPengiriman: '', kontakPengiriman: ''
-      }]);
-    }
+      }];
+    });
   };
 
   const removeFamilyMember = (id) => {
@@ -249,11 +255,17 @@ export default function UmrahForm() {
     const newErrors = {};
     if (!/^\d{16}$/.test(primary.nik)) newErrors.nik = "NIK wajib 16 digit angka";
     if (!/^(\+62|62|0)8[1-9][0-9]{6,10}$/.test(primary.whatsapp)) newErrors.whatsapp = "Format WA tidak valid (Contoh: 0812...)";
+    if (family.length > MAX_FAMILY_MEMBERS) newErrors.familyLimit = `Anggota keluarga maksimal ${MAX_FAMILY_MEMBERS} orang`;
 
     family.forEach((member, index) => {
+      if (!isParticipantObject(member)) {
+        newErrors[`fam_${index}_namaLengkap`] = "Data anggota keluarga tidak valid";
+        return;
+      }
+
       if (!member.hubungan) newErrors[`fam_${index}_hub`] = "Hubungan wajib diisi";
-      if (!/^\d{16}$/.test(member.nik)) newErrors[`fam_${index}_nik`] = "NIK wajib 16 digit angka";
-      if (member.namaLengkap.length < 3) newErrors[`fam_${index}_namaLengkap`] = "Nama wajib diisi";
+      if (!/^\d{16}$/.test(member.nik || "")) newErrors[`fam_${index}_nik`] = "NIK wajib 16 digit angka";
+      if ((member.namaLengkap || "").length < 3) newErrors[`fam_${index}_namaLengkap`] = "Nama wajib diisi";
     });
     
     setErrors(newErrors);
@@ -267,6 +279,7 @@ export default function UmrahForm() {
   const validateStep3 = () => {
     const newErrors = {};
     if (!documents.primary.ktp) newErrors.ktp = "KTP wajib diupload";
+    if (family.length > MAX_FAMILY_MEMBERS) newErrors.familyLimit = `Anggota keluarga maksimal ${MAX_FAMILY_MEMBERS} orang`;
     
     if (primary.statusPaspor === 'READY') {
       if (!documents.primary.paspor) newErrors.paspor = "Paspor wajib diupload";
@@ -281,6 +294,11 @@ export default function UmrahForm() {
     if (!primary.jenisKelamin) newErrors.jenisKelamin = "Jenis kelamin wajib dipilih";
 
     family.forEach((member, index) => {
+      if (!isParticipantObject(member)) {
+        newErrors[`fam_${index}_namaLengkap`] = "Data anggota keluarga tidak valid";
+        return;
+      }
+
       const memberDocuments = getFamilyDocuments(member.id);
       if (!memberDocuments.ktp) newErrors[`fam_${index}_ktp`] = "KTP anggota wajib diupload";
 
@@ -291,7 +309,7 @@ export default function UmrahForm() {
       }
 
       if (member.hasPasporHal4 && !memberDocuments.pasporHal4) newErrors[`fam_${index}_pasporHal4`] = "File Halaman 4 wajib diupload";
-      if (member.namaLengkap.length < 3) newErrors[`fam_${index}_namaLengkap`] = "Nama harus diperiksa & dilengkapi";
+      if ((member.namaLengkap || "").length < 3) newErrors[`fam_${index}_namaLengkap`] = "Nama harus diperiksa & dilengkapi";
       if (!member.tanggalLahir) newErrors[`fam_${index}_tanggalLahir`] = "Tanggal lahir wajib diisi";
       if (!member.jenisKelamin) newErrors[`fam_${index}_jenisKelamin`] = "Jenis kelamin wajib dipilih";
     });
@@ -302,8 +320,14 @@ export default function UmrahForm() {
 
   const validateStep4 = () => {
     const newErrors = {};
+    if (family.length > MAX_FAMILY_MEMBERS) newErrors.familyLimit = `Anggota keluarga maksimal ${MAX_FAMILY_MEMBERS} orang`;
 
     const validateParticipant = (participant, prefix) => {
+      if (!isParticipantObject(participant)) {
+        newErrors[`${prefix}_namaLengkap`] = "Data peserta tidak valid";
+        return;
+      }
+
       if (!participant.ukuranSeragam) newErrors[`${prefix}_ukuranSeragam`] = "Ukuran seragam wajib dipilih";
       if (!participant.perlengkapanIbadah) newErrors[`${prefix}_perlengkapanIbadah`] = "Pilihan perlengkapan ibadah wajib dipilih";
       if (participant.perlengkapanIbadah === 'DIKIRIM') {
@@ -346,7 +370,14 @@ export default function UmrahForm() {
       const projectPartner = projectName?.toLowerCase() === 'tira' ? 'Tira Satria Niaga' : 'Reguler';
       formData.append("project_partner", projectPartner);
       const finalPrimary = normalizeParticipantData(primary);
-      const finalFamily = family.map(normalizeParticipantData);
+      const finalFamily = family
+        .filter(isParticipantObject)
+        .slice(0, MAX_FAMILY_MEMBERS)
+        .map(normalizeParticipantData);
+
+      if (family.length > MAX_FAMILY_MEMBERS) {
+        throw new Error(`Anggota keluarga maksimal ${MAX_FAMILY_MEMBERS} orang.`);
+      }
 
       // Sesuai dengan payload Form Baru (tanpa toUpperCase/MENYUSUL di frontend)
       const pendaftarUtamaPayload = {
@@ -580,9 +611,9 @@ export default function UmrahForm() {
                   </div>
                 )}
 
-                {family.length < 4 && (
+                {family.length < MAX_FAMILY_MEMBERS && (
                   <button type="button" onClick={addFamilyMember} className="mt-4 w-full py-4 border-2 border-dashed border-slate-300 text-slate-500 rounded-xl hover:border-[#6D28D9] hover:text-[#6D28D9] hover:bg-[#6D28D9]/5 transition-all flex items-center justify-center font-medium">
-                    <Plus className="w-5 h-5 mr-2" /> Tambah Anggota Keluarga (Sisa kuota: {4 - family.length})
+                    <Plus className="w-5 h-5 mr-2" /> Tambah Anggota Keluarga (Sisa kuota: {MAX_FAMILY_MEMBERS - family.length})
                   </button>
                 )}
               </div>

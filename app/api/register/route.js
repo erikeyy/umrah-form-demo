@@ -3,6 +3,8 @@ import { google } from "googleapis";
 import crypto from "crypto"; // Untuk ID_PENDAFTARAN_GRUP acak [38]
 import { Readable } from "node:stream";
 
+const MAX_FAMILY_MEMBERS = 4;
+
 const deliveryLabel = (value) => {
   if (value === "DIKIRIM") return "Dikirim ke Alamat Tempat Tinggal";
   if (value === "AMBIL_KANTOR") return "Diambil di Kantor RiDATOUR";
@@ -72,9 +74,15 @@ const parseFamilyParticipants = (formData) => {
     throw new BadRequestError("Data keluarga tidak valid.");
   }
 
-  return payload
+  const familyMembers = payload
     .filter(isPlainObject)
     .map(normalizeParticipantData);
+
+  if (familyMembers.length > MAX_FAMILY_MEMBERS) {
+    throw new BadRequestError(`Anggota keluarga maksimal ${MAX_FAMILY_MEMBERS} orang.`);
+  }
+
+  return familyMembers;
 };
 
 const getGoogleSheetsId = () => {
