@@ -7,6 +7,10 @@ const interFont = Inter({ subsets: ["latin"] });
 export const metadata = {
   title: "Form Pendaftaran Umroh",
   description: "Treat you like family - RiDATOUR",
+  icons: {
+    icon: "/favicon.ico",
+    shortcut: "/favicon.ico",
+  },
 };
 
 export default function RootLayout({ children }) {
