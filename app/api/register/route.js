@@ -2,6 +2,12 @@ import { NextResponse } from "next/server";
 import { google } from "googleapis";
 import crypto from "crypto"; // Untuk ID_PENDAFTARAN_GRUP acak [38]
 
+const deliveryLabel = (value) => {
+  if (value === "DIKIRIM") return "Dikirim ke Alamat Tempat Tinggal";
+  if (value === "AMBIL_KANTOR") return "Diambil di Kantor RiDATOUR";
+  return "-";
+};
+
 // Autentikasi OAuth 2.0 (Service Account User Credentials)
 const oauth2Client = new google.auth.OAuth2(
   process.env.GOOGLE_CLIENT_ID,
@@ -48,7 +54,11 @@ export async function POST(request) {
       pendaftarUtama.jenisKelamin || "-",  // L
       "URL_KTP_DRIVE",                     // M
       "URL_PASPOR_UTAMA_DRIVE",            // N
-      "URL_PASPOR_HAL4_DRIVE"              // O
+      "URL_PASPOR_HAL4_DRIVE",             // O
+      pendaftarUtama.ukuranSeragam || "-", // P
+      deliveryLabel(pendaftarUtama.perlengkapanIbadah), // Q
+      pendaftarUtama.alamatPengiriman || "-",   // R
+      pendaftarUtama.kontakPengiriman || "-"    // S
     ]); // [36, 37, 45]
 
     // Baris 2 - 5: Anggota Keluarga (Di-loop secara dinamis)
@@ -68,7 +78,11 @@ export async function POST(request) {
         anggota.jenisKelamin || "-",
         "URL_KTP_KELUARGA_DRIVE",
         "URL_PASPOR_KELUARGA_DRIVE",
-        "-"
+        "-",
+        anggota.ukuranSeragam || "-",
+        deliveryLabel(anggota.perlengkapanIbadah),
+        anggota.alamatPengiriman || "-",
+        anggota.kontakPengiriman || "-"
       ]);
     }); // [37]
 
@@ -76,7 +90,7 @@ export async function POST(request) {
     const sheets = google.sheets({ version: "v4", auth: oauth2Client });
     await sheets.spreadsheets.values.append({
       spreadsheetId: process.env.GOOGLE_SHEETS_ID,
-      range: "Sheet1!A:O", // [46]
+      range: "Sheet1!A:S", // [46]
       valueInputOption: "USER_ENTERED",
       requestBody: { values: sheetValues },
     });

@@ -6,6 +6,20 @@ import { UploadCloud, CheckCircle2, AlertCircle, Plus, Trash2, ChevronRight, Che
 
 const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15MB
 const ACCEPTED_FILE_TYPES = ['image/jpeg', 'image/png', 'application/pdf'];
+const TOTAL_STEPS = 4;
+const SERAGAM_OPTIONS = [
+  { value: 'XS', label: 'XS', detail: 'LD 86-90 cm, panjang 64-66 cm' },
+  { value: 'S', label: 'S', detail: 'LD 90-94 cm, panjang 66-68 cm' },
+  { value: 'M', label: 'M', detail: 'LD 94-98 cm, panjang 68-70 cm' },
+  { value: 'L', label: 'L', detail: 'LD 98-104 cm, panjang 70-72 cm' },
+  { value: 'XL', label: 'XL', detail: 'LD 104-110 cm, panjang 72-74 cm' },
+  { value: 'XXL', label: 'XXL', detail: 'LD 110-118 cm, panjang 74-76 cm' },
+  { value: 'XXXL', label: 'XXXL', detail: 'LD 118-126 cm, panjang 76-78 cm' },
+];
+const DELIVERY_OPTIONS = {
+  DIKIRIM: 'Dikirim ke Alamat Tempat Tinggal',
+  AMBIL_KANTOR: 'Diambil di Kantor RiDATOUR',
+};
 
 // Fungsi Validasi Masa Berlaku Paspor
 const isValidPassport = (dateString) => {
@@ -18,7 +32,7 @@ const isValidPassport = (dateString) => {
 
 export default function UmrahForm() {
   const searchParams = useSearchParams();
-  const projectName = searchParams.get('project-name');
+  const projectName = searchParams.get('project-name') || 'Reguler';
 
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -29,7 +43,9 @@ export default function UmrahForm() {
   const [primary, setPrimary] = useState({
     namaLengkap: '', nik: '', whatsapp: '', email: '',
     noPaspor: '', pasporExpired: '', tanggalLahir: '',
-    jenisKelamin: '', statusPaspor: 'READY'
+    jenisKelamin: '', tempatLahir: '', statusPaspor: 'READY',
+    ukuranSeragam: '', perlengkapanIbadah: '',
+    alamatPengiriman: '', kontakPengiriman: ''
   });
 
   const [family, setFamily] = useState([]);
@@ -48,6 +64,9 @@ export default function UmrahForm() {
 
   const handleFamilyChange = (id, field, value) => {
     setFamily(prev => prev.map(member => member.id === id ? { ...member, [field]: value } : member));
+    const memberIndex = family.findIndex(member => member.id === id);
+    const errorKey = memberIndex >= 0 ? `fam_${memberIndex}_${field}` : null;
+    if (errorKey && errors[errorKey]) setErrors(prev => ({ ...prev, [errorKey]: null }));
   };
 
   const addFamilyMember = () => {
@@ -55,7 +74,9 @@ export default function UmrahForm() {
       setFamily(prev => [...prev, {
         id: Date.now(), namaLengkap: '', nik: '', hubungan: '',
         noPaspor: '', pasporExpired: '', tanggalLahir: '',
-        jenisKelamin: '', statusPaspor: 'READY'
+        jenisKelamin: '', tempatLahir: '', statusPaspor: 'READY',
+        ukuranSeragam: '', perlengkapanIbadah: '',
+        alamatPengiriman: '', kontakPengiriman: ''
       }]);
     }
   };
@@ -84,12 +105,12 @@ export default function UmrahForm() {
       }));
       setIsScanning(false);
       setOcrSuccess(true);
-      setErrors(prev => ({ ...prev, pasporExpired: null, noPaspor: null, namaLengkap: null, tanggalLahir: null, jenisKelamin: null }));
+      setErrors(prev => ({ ...prev, pasporExpired: null, noPaspor: null, namaLengkap: null, tanggalLahir: null, jenisKelamin: null, }));
     }, 1500);
   };
 
   const handleFileChange = (e, type) => {
-    const file = e.target.files;
+    const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > MAX_FILE_SIZE) {
       setErrors(prev => ({ ...prev, [type]: 'Ukuran file maksimal 15MB!' }));
@@ -104,19 +125,11 @@ export default function UmrahForm() {
     if (type === 'paspor') simulatePassportOCR(file);
   };
 
-  // 👇 PERBAIKAN LOGIKA: Keluarga divalidasi di Step 1 & Regex dikembalikan ke Form Baru
   const validateStep1 = () => {
     const newErrors = {};
     if (!/^\d{16}$/.test(primary.nik)) newErrors.nik = "NIK wajib 16 digit angka";
-    
-    // 👇 INI REGEX ASLI YANG BENAR (MENGEMBALIKAN LOGIKA DARI FORM LAMA/BARU LO)
     if (!/^(\+62|62|0)8[1-9][0-9]{6,10}$/.test(primary.whatsapp)) newErrors.whatsapp = "Format WA tidak valid (Contoh: 0812...)";
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-    
 
-    
-    // Logika keluarga ditarik dari validateStep2 ke sini
     family.forEach((member, index) => {
       if (!member.hubungan) newErrors[`fam_${index}_hub`] = "Hubungan wajib diisi";
     });
@@ -149,16 +162,38 @@ export default function UmrahForm() {
     return Object.keys(newErrors).length === 0;
   };
 
+  const validateStep4 = () => {
+    const newErrors = {};
+
+    const validateParticipant = (participant, prefix) => {
+      if (!participant.ukuranSeragam) newErrors[`${prefix}_ukuranSeragam`] = "Ukuran seragam wajib dipilih";
+      if (!participant.perlengkapanIbadah) newErrors[`${prefix}_perlengkapanIbadah`] = "Pilihan perlengkapan ibadah wajib dipilih";
+      if (participant.perlengkapanIbadah === 'DIKIRIM') {
+        if (!participant.alamatPengiriman?.trim()) newErrors[`${prefix}_alamatPengiriman`] = "Alamat lengkap wajib diisi";
+        if (!/^(\+62|62|0)8[1-9][0-9]{6,10}$/.test(participant.kontakPengiriman || '')) {
+          newErrors[`${prefix}_kontakPengiriman`] = "Nomor yang dapat dihubungi tidak valid";
+        }
+      }
+    };
+
+    validateParticipant(primary, 'primary');
+    family.forEach((member, index) => validateParticipant(member, `fam_${index}`));
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
   const nextStep = () => {
     if (step === 1 && validateStep1()) setStep(2);
     if (step === 2 && validateStep2()) setStep(3);
+    if (step === 3 && validateStep3()) setStep(4);
   };
   
   const prevStep = () => setStep(prev => prev - 1);
 
   const onSubmit = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
-    if (typeof validateStep3 === 'function' && !validateStep3()) return;
+    if (!validateStep4()) return;
     
     setIsSubmitting(true);
     setErrorMsg("");
@@ -197,6 +232,31 @@ export default function UmrahForm() {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const allParticipants = [
+    { ...primary, hubungan: "Pendaftar Utama", prefix: "primary" },
+    ...family.map((member, index) => ({ ...member, prefix: `fam_${index}` }))
+  ];
+
+  const getSizeDetail = (size) => SERAGAM_OPTIONS.find(option => option.value === size)?.detail || "-";
+  const getDeliveryLabel = (value) => DELIVERY_OPTIONS[value] || "-";
+
+  const updateParticipantField = (participant, field, value) => {
+    const nextValues = field === 'perlengkapanIbadah' && value !== 'DIKIRIM'
+      ? { [field]: value, alamatPengiriman: '', kontakPengiriman: '' }
+      : { [field]: value };
+
+    if (participant.prefix === 'primary') {
+      setPrimary(prev => ({ ...prev, ...nextValues }));
+    } else {
+      setFamily(prev => prev.map(member => member.id === participant.id ? { ...member, ...nextValues } : member));
+    }
+    const errorKeys = [`${participant.prefix}_${field}`];
+    if (field === 'perlengkapanIbadah') {
+      errorKeys.push(`${participant.prefix}_alamatPengiriman`, `${participant.prefix}_kontakPengiriman`);
+    }
+    setErrors(prev => errorKeys.reduce((acc, key) => ({ ...acc, [key]: null }), prev));
   };
 
   if (isSuccess) {
@@ -262,11 +322,11 @@ export default function UmrahForm() {
               <div className="absolute left-0 top-1/2 -translate-y-1/2 w-full h-1 bg-slate-200 rounded-full z-0">
                 <div 
                   className="h-full bg-[#6D28D9] rounded-full transition-all duration-500 ease-out" 
-                  style={{ width: `${((step - 1) / 2) * 100}%` }} 
+                  style={{ width: `${((step - 1) / (TOTAL_STEPS - 1)) * 100}%` }} 
                 />
               </div>
               <div className="relative z-10 flex justify-between">
-                {[ { num: 1, label: 'Data & Keluarga' }, { num: 2, label: 'Status Paspor' }, { num: 3, label: 'Dokumen' } ].map((item) => (
+                {[ { num: 1, label: 'Data & Keluarga' }, { num: 2, label: 'Status Paspor' }, { num: 3, label: 'Dokumen' }, { num: 4, label: 'Review' } ].map((item) => (
                   <div key={item.num} className="flex flex-col items-center relative">
                     <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm transition-colors duration-300 ${step >= item.num ? 'bg-[#6D28D9] text-white shadow-md shadow-purple-200' : 'bg-white border-2 border-slate-200 text-slate-400'}`}>
                       {item.num}
@@ -525,6 +585,125 @@ export default function UmrahForm() {
               </div>
             )}
 
+            {/* ================= STEP 4: REVIEW & VALIDASI DATA ================= */}
+            {step === 4 && (
+              <div className="space-y-6 animate-in slide-in-from-right-4 fade-in duration-300">
+                <div className="border-b pb-2">
+                  <h2 className="text-xl font-bold text-slate-800">Review & Validasi Data</h2>
+                  <p className="text-sm text-slate-500">Periksa kembali seluruh data sebelum pendaftaran dikirim.</p>
+                </div>
+
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                  <p className="font-bold mb-1">Panduan universal size chart Indonesia</p>
+                  <p>Ukuran seragam bersifat unisex dewasa. LD = lingkar dada. Pilih ukuran yang paling nyaman, terutama jika akan dipakai berlapis.</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
+                    {SERAGAM_OPTIONS.map((option) => (
+                      <div key={option.value} className="flex items-center justify-between rounded-lg bg-white/70 px-3 py-2 border border-amber-100">
+                        <span className="font-bold">{option.label}</span>
+                        <span className="text-xs text-amber-800 text-right">{option.detail}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {allParticipants.map((participant, index) => (
+                  <div key={participant.prefix} className="border border-slate-200 rounded-2xl p-5 bg-white shadow-sm">
+                    <div className="flex items-start justify-between gap-3 mb-5">
+                      <div>
+                        <p className="text-xs font-bold text-[#6D28D9] uppercase tracking-wide">{participant.hubungan || `Anggota #${index}`}</p>
+                        <h3 className="text-lg font-bold text-slate-800 mt-1">{participant.namaLengkap || "Nama belum diisi"}</h3>
+                      </div>
+                      <span className="text-xs font-semibold text-slate-500 bg-slate-100 rounded-full px-3 py-1">Peserta {index + 1}</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-5">
+                      <div>
+                        <label className="block text-sm font-semibold text-slate-700 mb-2">Ukuran Seragam</label>
+                        <select
+                          value={participant.ukuranSeragam || ""}
+                          onChange={(e) => updateParticipantField(participant, 'ukuranSeragam', e.target.value)}
+                          className="w-full border border-slate-300 rounded-lg p-3 outline-none focus:ring-2 focus:ring-[#6D28D9] transition-all bg-white"
+                        >
+                          <option value="">Pilih ukuran</option>
+                          {SERAGAM_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label} - {option.detail}</option>
+                          ))}
+                        </select>
+                        {errors[`${participant.prefix}_ukuranSeragam`] && <p className="text-red-500 text-xs mt-1">{errors[`${participant.prefix}_ukuranSeragam`]}</p>}
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-semibold text-slate-700 mb-2">Perlengkapan Ibadah</label>
+                        <select
+                          value={participant.perlengkapanIbadah || ""}
+                          onChange={(e) => updateParticipantField(participant, 'perlengkapanIbadah', e.target.value)}
+                          className="w-full border border-slate-300 rounded-lg p-3 outline-none focus:ring-2 focus:ring-[#6D28D9] transition-all bg-white"
+                        >
+                          <option value="">Pilih metode</option>
+                          <option value="DIKIRIM">{DELIVERY_OPTIONS.DIKIRIM}</option>
+                          <option value="AMBIL_KANTOR">{DELIVERY_OPTIONS.AMBIL_KANTOR}</option>
+                        </select>
+                        {errors[`${participant.prefix}_perlengkapanIbadah`] && <p className="text-red-500 text-xs mt-1">{errors[`${participant.prefix}_perlengkapanIbadah`]}</p>}
+                      </div>
+                    </div>
+
+                    {participant.perlengkapanIbadah === 'DIKIRIM' && (
+                      <div className="rounded-xl border border-orange-200 bg-orange-50 p-4 mb-5 animate-in fade-in duration-150">
+                        <div className="flex items-start gap-2 text-orange-800 mb-4">
+                          <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                          <p className="text-sm font-semibold">Biaya pengiriman perlengkapan ibadah ditanggung oleh jamaah masing-masing.</p>
+                        </div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="md:col-span-2">
+                            <label className="block text-sm font-semibold text-slate-700 mb-2">Alamat Lengkap Pengiriman</label>
+                            <textarea
+                              value={participant.alamatPengiriman || ""}
+                              onChange={(e) => updateParticipantField(participant, 'alamatPengiriman', e.target.value)}
+                              rows={3}
+                              className="w-full border border-orange-200 rounded-lg p-3 outline-none focus:ring-2 focus:ring-orange-400 transition-all bg-white"
+                              placeholder="Nama jalan, nomor rumah, RT/RW, kelurahan, kecamatan, kota/kabupaten, provinsi, kode pos"
+                            />
+                            {errors[`${participant.prefix}_alamatPengiriman`] && <p className="text-red-500 text-xs mt-1">{errors[`${participant.prefix}_alamatPengiriman`]}</p>}
+                          </div>
+                          <div>
+                            <label className="block text-sm font-semibold text-slate-700 mb-2">Nomor yang Dapat Dihubungi</label>
+                            <input
+                              type="tel"
+                              value={participant.kontakPengiriman || ""}
+                              onChange={(e) => updateParticipantField(participant, 'kontakPengiriman', e.target.value)}
+                              className="w-full border border-orange-200 rounded-lg p-3 outline-none focus:ring-2 focus:ring-orange-400 transition-all bg-white"
+                              placeholder="Contoh: 08123456789"
+                            />
+                            {errors[`${participant.prefix}_kontakPengiriman`] && <p className="text-red-500 text-xs mt-1">{errors[`${participant.prefix}_kontakPengiriman`]}</p>}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="rounded-xl bg-slate-50 border border-slate-100 p-4">
+                      <p className="text-sm font-bold text-slate-800 mb-3">Ringkasan Data Peserta</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                        <div><span className="text-slate-500">NIK:</span> <span className="font-semibold text-slate-800">{participant.nik || "-"}</span></div>
+                        <div><span className="text-slate-500">Status paspor:</span> <span className="font-semibold text-slate-800">{participant.statusPaspor === 'READY' ? 'Sudah punya paspor' : 'Menyusul / sedang proses'}</span></div>
+                        <div><span className="text-slate-500">No. paspor:</span> <span className="font-semibold text-slate-800">{participant.statusPaspor === 'READY' ? participant.noPaspor || "-" : "MENYUSUL"}</span></div>
+                        <div><span className="text-slate-500">Expired paspor:</span> <span className="font-semibold text-slate-800">{participant.statusPaspor === 'READY' ? participant.pasporExpired || "-" : "-"}</span></div>
+                        <div><span className="text-slate-500">Tanggal lahir:</span> <span className="font-semibold text-slate-800">{participant.tanggalLahir || "-"}</span></div>
+                        <div><span className="text-slate-500">Jenis kelamin:</span> <span className="font-semibold text-slate-800">{participant.jenisKelamin || "-"}</span></div>
+                        <div><span className="text-slate-500">Ukuran seragam:</span> <span className="font-semibold text-slate-800">{participant.ukuranSeragam ? `${participant.ukuranSeragam} (${getSizeDetail(participant.ukuranSeragam)})` : "-"}</span></div>
+                        <div><span className="text-slate-500">Perlengkapan:</span> <span className="font-semibold text-slate-800">{getDeliveryLabel(participant.perlengkapanIbadah)}</span></div>
+                        {participant.perlengkapanIbadah === 'DIKIRIM' && (
+                          <>
+                            <div className="sm:col-span-2"><span className="text-slate-500">Alamat kirim:</span> <span className="font-semibold text-slate-800">{participant.alamatPengiriman || "-"}</span></div>
+                            <div className="sm:col-span-2"><span className="text-slate-500">Kontak kirim:</span> <span className="font-semibold text-slate-800">{participant.kontakPengiriman || "-"}</span></div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {/* ERROR NOTIFICATION */}
             {errorMsg && (
               <div className="bg-red-50 text-red-700 p-3 rounded-lg mt-6 mb-4 flex items-center">
@@ -540,9 +719,9 @@ export default function UmrahForm() {
                 </button>
               ) : <div/>}
 
-              {step < 3 ? (
+              {step < TOTAL_STEPS ? (
                 <button type="button" onClick={nextStep} className="px-8 py-3 bg-[#6D28D9] text-white font-bold tracking-wide rounded-xl hover:bg-[#5b21b6] shadow-md shadow-purple-200 transition-all flex items-center">
-                  Lanjut <ChevronRight size={18} className="ml-1.5" />
+                  {step === 3 ? "Review Data" : "Lanjut"} <ChevronRight size={18} className="ml-1.5" />
                 </button>
               ) : (
                 <button type="button" onClick={onSubmit} disabled={isSubmitting || isScanning} className="px-8 py-3 bg-[#eab308] text-slate-900 font-bold tracking-wide rounded-xl hover:bg-[#dca507] shadow-md shadow-yellow-200 transition-all flex items-center disabled:opacity-70">
