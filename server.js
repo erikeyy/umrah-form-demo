@@ -1,17 +1,14 @@
-const { createServer } = require('http');
-const { parse } = require('url');
-const next = require('next');
+const fs = require("fs");
+const path = require("path");
 
-const dev = process.env.NODE_ENV !== 'production';
-const app = next({ dev });
-const handle = app.getRequestHandler();
+process.env.NODE_ENV = "production";
+process.env.HOSTNAME = process.env.NEXT_HOSTNAME || "127.0.0.1";
 
-app.prepare().then(() => {
-  createServer((req, res) => {
-    const parsedUrl = parse(req.url, true);
-    handle(req, res, parsedUrl);
-  }).listen(process.env.PORT || 3000, (err) => {
-    if (err) throw err;
-    console.log('> Ready on http://localhost:' + (process.env.PORT || 3000));
-  });
-}); // [7, 8]
+const standaloneServer = path.join(__dirname, ".next", "standalone", "server.js");
+
+if (!fs.existsSync(standaloneServer)) {
+  console.error("Standalone server tidak ditemukan. Jalankan `npm run build` sebelum start.");
+  process.exit(1);
+}
+
+require(standaloneServer);
