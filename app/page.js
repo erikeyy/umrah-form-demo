@@ -1,6 +1,9 @@
 import { Suspense } from 'react';
 import UmrahForm from './components/UmrahForm';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 export default function RegisterPage() {
   return (
     // Suspense akan mengamankan form yang membaca URL Parameter dari Error SSR
