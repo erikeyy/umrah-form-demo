@@ -20,6 +20,32 @@ const DELIVERY_OPTIONS = {
   DIKIRIM: 'Dikirim ke Alamat Tempat Tinggal',
   AMBIL_KANTOR: 'Diambil di Kantor RiDATOUR',
 };
+const NAME_FILLER_NOISE = /^[CLKI]+$/;
+const NAME_OCR_FIXES = new Map([
+  ['SERIK', 'ERIK'],
+  ['NYULIANTO', 'YULIANTO'],
+]);
+
+const cleanParticipantName = (value = "") => {
+  const tokens = String(value)
+    .toUpperCase()
+    .replace(/[^A-Z\s']/g, " ")
+    .split(/\s+/)
+    .map((token) => {
+      const normalized = token.replace(/[^A-Z]/g, "");
+      if (normalized.length < 2 || NAME_FILLER_NOISE.test(normalized)) return "";
+      return NAME_OCR_FIXES.get(normalized) || normalized;
+    })
+    .filter(Boolean);
+
+  return tokens.join(" ").trim();
+};
+
+const normalizeParticipantData = (participant) => ({
+  ...participant,
+  namaLengkap: cleanParticipantName(participant.namaLengkap),
+  noPaspor: participant.noPaspor?.toUpperCase().replace(/[^A-Z0-9]/g, "") || "",
+});
 
 // Fungsi Validasi Masa Berlaku Paspor
 const isValidPassport = (dateString) => {
@@ -148,7 +174,7 @@ export default function UmrahForm() {
       if (owner === 'family') {
         setFamily(prev => prev.map(member => member.id === memberId ? {
           ...member,
-          namaLengkap: ocrData.namaLengkap || member.namaLengkap,
+          namaLengkap: cleanParticipantName(ocrData.namaLengkap) || member.namaLengkap,
           noPaspor: ocrData.noPaspor || member.noPaspor,
           pasporExpired: ocrData.pasporExpired || member.pasporExpired,
           tanggalLahir: ocrData.tanggalLahir || member.tanggalLahir,
@@ -166,7 +192,7 @@ export default function UmrahForm() {
       } else {
         setPrimary(prev => ({
           ...prev,
-          namaLengkap: ocrData.namaLengkap || prev.namaLengkap,
+          namaLengkap: cleanParticipantName(ocrData.namaLengkap) || prev.namaLengkap,
           noPaspor: ocrData.noPaspor || prev.noPaspor,
           pasporExpired: ocrData.pasporExpired || prev.pasporExpired,
           tanggalLahir: ocrData.tanggalLahir || prev.tanggalLahir,
@@ -298,7 +324,11 @@ export default function UmrahForm() {
   const nextStep = () => {
     if (step === 1 && validateStep1()) setStep(2);
     if (step === 2 && validateStep2()) setStep(3);
-    if (step === 3 && validateStep3()) setStep(4);
+    if (step === 3 && validateStep3()) {
+      setPrimary(prev => normalizeParticipantData(prev));
+      setFamily(prev => prev.map(normalizeParticipantData));
+      setStep(4);
+    }
   };
   
   const prevStep = () => setStep(prev => prev - 1);
@@ -315,22 +345,24 @@ export default function UmrahForm() {
       
       const projectPartner = projectName?.toLowerCase() === 'tira' ? 'Tira Satria Niaga' : 'Reguler';
       formData.append("project_partner", projectPartner);
+      const finalPrimary = normalizeParticipantData(primary);
+      const finalFamily = family.map(normalizeParticipantData);
 
       // Sesuai dengan payload Form Baru (tanpa toUpperCase/MENYUSUL di frontend)
       const pendaftarUtamaPayload = {
-        ...primary,
+        ...finalPrimary,
         hubungan: "Pendaftar Utama"
       };
       
       formData.append("pendaftarUtama", JSON.stringify(pendaftarUtamaPayload));
-      formData.append("keluarga", JSON.stringify(family));
+      formData.append("keluarga", JSON.stringify(finalFamily));
 
       if (documents.primary.ktp) formData.append("utama_ktp", documents.primary.ktp);
       if (documents.primary.paspor) formData.append("utama_paspor", documents.primary.paspor);
       if (hasPasporHal4 && documents.primary.pasporHal4) formData.append("utama_paspor_hal4", documents.primary.pasporHal4);
-      if (primary.statusPaspor === 'PENDING' && documents.primary.pasporHal4) formData.append("utama_resi_paspor", documents.primary.pasporHal4);
+      if (finalPrimary.statusPaspor === 'PENDING' && documents.primary.pasporHal4) formData.append("utama_resi_paspor", documents.primary.pasporHal4);
 
-      family.forEach((member, index) => {
+      finalFamily.forEach((member, index) => {
         const memberDocuments = getFamilyDocuments(member.id);
         if (memberDocuments.ktp) formData.append(`keluarga_${index}_ktp`, memberDocuments.ktp);
         if (memberDocuments.paspor) formData.append(`keluarga_${index}_paspor`, memberDocuments.paspor);
@@ -356,8 +388,8 @@ export default function UmrahForm() {
   };
 
   const allParticipants = [
-    { ...primary, hubungan: "Pendaftar Utama", prefix: "primary" },
-    ...family.map((member, index) => ({ ...member, prefix: `fam_${index}` }))
+    { ...normalizeParticipantData(primary), hubungan: "Pendaftar Utama", prefix: "primary" },
+    ...family.map((member, index) => ({ ...normalizeParticipantData(member), prefix: `fam_${index}` }))
   ];
 
   const getSizeDetail = (size) => SERAGAM_OPTIONS.find(option => option.value === size)?.detail || "-";

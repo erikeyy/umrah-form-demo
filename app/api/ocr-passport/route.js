@@ -1,182 +1,95 @@
 import { NextResponse } from "next/server";
-import { DocumentProcessorServiceClient } from "@google-cloud/documentai";
+import path from "node:path";
+import { createWorker } from "tesseract.js";
 
 export const runtime = "nodejs";
 
 const MAX_FILE_SIZE = 15 * 1024 * 1024;
-const ACCEPTED_MIME_TYPES = new Set(["image/jpeg", "image/png", "application/pdf"]);
+const ACCEPTED_MIME_TYPES = new Set(["image/jpeg", "image/png"]);
+const TESSERACT_LANG_PATH = path.join(
+  process.cwd(),
+  "node_modules",
+  "@tesseract.js-data",
+  "eng",
+  "4.0.0"
+);
+const TESSERACT_WORKER_PATH = path.join(
+  process.cwd(),
+  "node_modules",
+  "tesseract.js",
+  "src",
+  "worker-script",
+  "node",
+  "index.js"
+);
+const TESSERACT_CORE_PATH = path.join(
+  process.cwd(),
+  "node_modules",
+  "tesseract.js-core"
+);
 
-const CONFIG_ENV = {
-  projectId: ["DOCUMENT_AI_PROJECT_ID", "GOOGLE_CLOUD_PROJECT", "GOOGLE_PROJECT_ID"],
-  location: ["DOCUMENT_AI_LOCATION"],
-  processorId: ["DOCUMENT_AI_PROCESSOR_ID", "DOCUMENT_AI_PASSPORT_PROCESSOR_ID"],
-  serviceAccountJson: ["GOOGLE_SERVICE_ACCOUNT_JSON", "DOCUMENT_AI_SERVICE_ACCOUNT_JSON"],
-  clientEmail: ["DOCUMENT_AI_CLIENT_EMAIL", "GOOGLE_CLIENT_EMAIL"],
-  privateKey: ["DOCUMENT_AI_PRIVATE_KEY", "GOOGLE_PRIVATE_KEY"],
-};
+const cleanPassportNumber = (value = "") =>
+  value.toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/O/g, "0");
 
-const FIELD_ALIASES = {
-  noPaspor: [
-    "passport_number",
-    "passport number",
-    "document_number",
-    "document number",
-    "nomor_paspor",
-    "nomor paspor",
-    "no_paspor",
-    "no paspor",
-  ],
-  tanggalLahir: [
-    "date_of_birth",
-    "date of birth",
-    "birth_date",
-    "birth date",
-    "tanggal_lahir",
-    "tanggal lahir",
-    "dob",
-  ],
-  pasporExpired: [
-    "expiration_date",
-    "expiration date",
-    "expiry_date",
-    "expiry date",
-    "date_of_expiry",
-    "date of expiry",
-    "passport_expiry",
-    "passport expiry",
-    "tanggal_berakhir",
-    "tanggal berakhir",
-    "berlaku_sampai",
-    "berlaku sampai",
-  ],
-  namaLengkap: [
-    "full_name",
-    "full name",
-    "name",
-    "nama",
-    "nama_lengkap",
-    "nama lengkap",
-    "surname_given_names",
-  ],
-  jenisKelamin: [
-    "sex",
-    "gender",
-    "jenis_kelamin",
-    "jenis kelamin",
-  ],
-};
-
-class DocumentAiConfigError extends Error {
-  constructor(message, details = []) {
-    super(message);
-    this.name = "DocumentAiConfigError";
-    this.details = details;
-  }
-}
-
-const getEnv = (keys) => {
-  for (const key of keys) {
-    const value = process.env[key]?.trim();
-    if (value) return value;
-  }
-  return "";
-};
-
-const parseServiceAccountJson = (rawJson) => {
-  if (!rawJson) return null;
-
-  try {
-    return JSON.parse(rawJson);
-  } catch {
-    throw new DocumentAiConfigError(
-      "Konfigurasi Document AI tidak valid.",
-      ["GOOGLE_SERVICE_ACCOUNT_JSON harus berupa JSON service account yang valid."]
-    );
-  }
-};
-
-const getDocumentAiConfig = () => {
-  const serviceAccountJson = getEnv(CONFIG_ENV.serviceAccountJson);
-  const credentials = parseServiceAccountJson(serviceAccountJson);
-  const projectId = getEnv(CONFIG_ENV.projectId) || credentials?.project_id || "";
-  const location = getEnv(CONFIG_ENV.location);
-  const processorId = getEnv(CONFIG_ENV.processorId);
-  const clientEmail = getEnv(CONFIG_ENV.clientEmail);
-  const privateKey = getEnv(CONFIG_ENV.privateKey);
-  const hasSplitCredentials = Boolean(clientEmail && privateKey);
-  const hasAdcCredentials = Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim());
-
-  const missing = [];
-  if (!projectId) missing.push("DOCUMENT_AI_PROJECT_ID");
-  if (!location) missing.push("DOCUMENT_AI_LOCATION");
-  if (!processorId) missing.push("DOCUMENT_AI_PROCESSOR_ID");
-  if (!credentials && !hasSplitCredentials && !hasAdcCredentials) {
-    missing.push("GOOGLE_SERVICE_ACCOUNT_JSON atau DOCUMENT_AI_CLIENT_EMAIL + DOCUMENT_AI_PRIVATE_KEY");
-  }
-
-  if (missing.length > 0) {
-    throw new DocumentAiConfigError(
-      `Konfigurasi Document AI belum lengkap: ${missing.join(", ")}`,
-      missing
-    );
-  }
-
-  return {
-    projectId,
-    location,
-    processorId,
-    credentials,
-    clientEmail,
-    privateKey,
-  };
-};
-
-const getDocumentAiClient = ({ credentials, clientEmail, privateKey, projectId }) => {
-  if (credentials) {
-    return new DocumentProcessorServiceClient({
-      credentials: {
-        client_email: credentials.client_email,
-        private_key: credentials.private_key?.replace(/\\n/g, "\n"),
-      },
-      projectId,
-    });
-  }
-
-  if (clientEmail && privateKey) {
-    return new DocumentProcessorServiceClient({
-      credentials: {
-        client_email: clientEmail,
-        private_key: privateKey.replace(/\\n/g, "\n"),
-      },
-      projectId,
-    });
-  }
-
-  return new DocumentProcessorServiceClient({ projectId });
-};
-
-const normalizeKey = (value = "") => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-const cleanPassportNumber = (value = "") => value.toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/O/g, "0");
-
-const getTextAnchorText = (text, textAnchor) => {
-  const segments = textAnchor?.textSegments || [];
-  return segments.map((segment) => {
-    const start = Number(segment.startIndex || 0);
-    const end = Number(segment.endIndex || 0);
-    return text.slice(start, end);
-  }).join("");
-};
+const normalizeOcrText = (text = "") =>
+  text
+    .replace(/\r/g, "\n")
+    .replace(/[|]/g, "I")
+    .replace(/[«‹]/g, "<")
+    .replace(/[»›]/g, ">")
+    .replace(/[ \t]+/g, " ")
+    .trim();
 
 const normalizeDate = (value) => {
   if (!value) return "";
-  const raw = String(value).trim();
-  const normalized = raw.replace(/[./]/g, "-");
 
-  const iso = normalized.match(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/);
+  const raw = String(value)
+    .trim()
+    .replace(/[./]/g, "-")
+    .replace(/\s+/g, " ");
+
+  const iso = raw.match(/\b(\d{4})-(\d{1,2})-(\d{1,2})\b/);
   if (iso) return `${iso[1]}-${iso[2].padStart(2, "0")}-${iso[3].padStart(2, "0")}`;
 
-  const dmy = normalized.match(/\b(\d{1,2})-(\d{1,2})-(\d{4})\b/);
-  if (dmy) return `${dmy[3]}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
+  const dmy = raw.match(/\b(\d{1,2})-(\d{1,2})-(\d{2,4})\b/);
+  if (dmy) {
+    const year = dmy[3].length === 2 ? `20${dmy[3]}` : dmy[3];
+    return `${year}-${dmy[2].padStart(2, "0")}-${dmy[1].padStart(2, "0")}`;
+  }
+
+  const monthNames = {
+    jan: "01",
+    januari: "01",
+    feb: "02",
+    februari: "02",
+    mar: "03",
+    maret: "03",
+    apr: "04",
+    april: "04",
+    may: "05",
+    mei: "05",
+    jun: "06",
+    juni: "06",
+    jul: "07",
+    juli: "07",
+    aug: "08",
+    agustus: "08",
+    sep: "09",
+    sept: "09",
+    september: "09",
+    oct: "10",
+    okt: "10",
+    oktober: "10",
+    nov: "11",
+    november: "11",
+    dec: "12",
+    des: "12",
+    desember: "12",
+  };
+  const namedMonth = raw.toLowerCase().match(/\b(\d{1,2})\s+([a-z]+)\s+(\d{4})\b/);
+  if (namedMonth && monthNames[namedMonth[2]]) {
+    return `${namedMonth[3]}-${monthNames[namedMonth[2]]}-${namedMonth[1].padStart(2, "0")}`;
+  }
 
   return "";
 };
@@ -203,10 +116,42 @@ const mrzDateToIso = (value, mode) => {
   return `${year}-${month}-${day}`;
 };
 
+const normalizeMrzLine = (line = "") =>
+  line
+    .toUpperCase()
+    .replace(/\s/g, "")
+    .replace(/[<({\[]/g, "<")
+    .replace(/[>)}\]]/g, "<")
+    .replace(/[^A-Z0-9<]/g, "");
+
+const MRZ_FILLER_NOISE = /^[CLKI]+$/;
+const COMMON_LEADING_NOISE_FIXES = new Map([
+  ["SERIK", "ERIK"],
+  ["NYULIANTO", "YULIANTO"],
+]);
+
+const cleanMrzNameToken = (token = "") => {
+  const normalized = token.toUpperCase().replace(/[^A-Z]/g, "");
+  if (normalized.length < 2 || MRZ_FILLER_NOISE.test(normalized)) return "";
+  if (COMMON_LEADING_NOISE_FIXES.has(normalized)) return COMMON_LEADING_NOISE_FIXES.get(normalized);
+
+  return normalized;
+};
+
+const cleanMrzName = (...nameParts) => {
+  const tokens = nameParts
+    .join(" ")
+    .split(/\s+/)
+    .map(cleanMrzNameToken)
+    .filter(Boolean);
+
+  return tokens.join(" ").trim();
+};
+
 const parseMrz = (text = "") => {
   const lines = text
-    .split(/\r?\n/)
-    .map((line) => line.toUpperCase().replace(/\s/g, ""))
+    .split(/\n/)
+    .map(normalizeMrzLine)
     .filter((line) => line.includes("<") && line.length >= 30);
 
   for (let index = 0; index < lines.length - 1; index += 1) {
@@ -218,13 +163,14 @@ const parseMrz = (text = "") => {
     const nameParts = line1.slice(5).split("<<");
     const surname = nameParts[0]?.replace(/</g, " ").trim();
     const givenNames = nameParts[1]?.replace(/</g, " ").trim();
+    const namaLengkap = cleanMrzName(givenNames, surname);
 
     return {
       noPaspor: cleanPassportNumber(line2.slice(0, 9).replace(/</g, "")),
-      tanggalLahir: mrzDateToIso(line2.slice(13, 19), "birth"),
-      pasporExpired: mrzDateToIso(line2.slice(21, 27), "expiry"),
+      tanggalLahir: mrzDateToIso(line2.slice(13, 19).replace(/[A-Z]/g, "0"), "birth"),
+      pasporExpired: mrzDateToIso(line2.slice(21, 27).replace(/[A-Z]/g, "0"), "expiry"),
       jenisKelamin: line2[20] === "F" ? "P" : line2[20] === "M" ? "L" : "",
-      namaLengkap: [givenNames, surname].filter(Boolean).join(" ").trim(),
+      namaLengkap,
       source: "mrz",
     };
   }
@@ -232,70 +178,101 @@ const parseMrz = (text = "") => {
   return {};
 };
 
-const getEntityValue = (entity, documentText) => {
-  const normalizedText = entity.normalizedValue?.text;
-  const normalizedDate = entity.normalizedValue?.dateValue;
+const getLines = (text = "") =>
+  text
+    .split(/\n/)
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
 
-  if (normalizedText) return normalizedText;
-  if (normalizedDate?.year && normalizedDate?.month && normalizedDate?.day) {
-    return `${normalizedDate.year}-${String(normalizedDate.month).padStart(2, "0")}-${String(normalizedDate.day).padStart(2, "0")}`;
+const valueAfterLabel = (lines, labelPattern) => {
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const sameLine = line.match(new RegExp(`${labelPattern}\\s*[:\\-]?\\s*(.+)$`, "i"));
+    if (sameLine?.[1]) return sameLine[1].trim();
+
+    if (new RegExp(labelPattern, "i").test(line) && lines[index + 1]) {
+      return lines[index + 1].trim();
+    }
   }
-  if (entity.mentionText) return entity.mentionText;
-  return getTextAnchorText(documentText, entity.textAnchor);
+
+  return "";
 };
 
-const parseEntities = (document) => {
-  const documentText = document?.text || "";
-  const fields = {};
-  const allEntities = [];
+const findFirstDateNearLabel = (lines, labelPattern) => {
+  const datePattern = /(\d{1,2}[./-]\d{1,2}[./-]\d{2,4}|\d{4}[./-]\d{1,2}[./-]\d{1,2}|\d{1,2}\s+[A-Za-z]+\s+\d{4})/;
 
-  const collectEntities = (entities = []) => {
-    for (const entity of entities) {
-      allEntities.push(entity);
-      collectEntities(entity.properties || []);
-    }
-  };
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!new RegExp(labelPattern, "i").test(lines[index])) continue;
 
-  collectEntities(document?.entities || []);
+    const current = lines[index].match(datePattern)?.[1];
+    if (current) return normalizeDate(current);
 
-  for (const entity of allEntities) {
-    const key = normalizeKey(entity.type || "");
-    const value = getEntityValue(entity, documentText);
-
-    for (const [fieldName, aliases] of Object.entries(FIELD_ALIASES)) {
-      if (aliases.map(normalizeKey).includes(key) && value) {
-        fields[fieldName] = value;
-      }
-    }
+    const next = lines[index + 1]?.match(datePattern)?.[1];
+    if (next) return normalizeDate(next);
   }
+
+  return "";
+};
+
+const parsePlainTextFields = (text = "") => {
+  const lines = getLines(text);
+  const passportRaw =
+    valueAfterLabel(lines, "(?:passport\\s*(?:no|number)|document\\s*(?:no|number)|nomor\\s*paspor|no\\.?\\s*paspor)") ||
+    text.match(/\b[A-Z][0-9O]{7,8}\b/i)?.[0] ||
+    "";
+  const genderRaw = valueAfterLabel(lines, "(?:sex|gender|jenis\\s*kelamin)");
+  const nameRaw =
+    valueAfterLabel(lines, "(?:full\\s*name|name|nama\\s*lengkap|nama)") ||
+    "";
 
   return {
-    noPaspor: fields.noPaspor ? cleanPassportNumber(fields.noPaspor) : "",
-    tanggalLahir: normalizeDate(fields.tanggalLahir),
-    pasporExpired: normalizeDate(fields.pasporExpired),
-    namaLengkap: fields.namaLengkap?.replace(/\s+/g, " ").trim().toUpperCase() || "",
-    jenisKelamin: /^(m|male|l|laki)/i.test(fields.jenisKelamin || "")
+    noPaspor: passportRaw ? cleanPassportNumber(passportRaw).slice(0, 9) : "",
+    tanggalLahir: findFirstDateNearLabel(lines, "(?:date\\s*of\\s*birth|birth\\s*date|tanggal\\s*lahir|tgl\\.?\\s*lahir)"),
+    pasporExpired: findFirstDateNearLabel(lines, "(?:expiry|expiration|date\\s*of\\s*expiry|berlaku\\s*sampai|tanggal\\s*berakhir)"),
+    namaLengkap: nameRaw
+      .replace(/[^A-Za-z\s']/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+      .toUpperCase(),
+    jenisKelamin: /^(m|male|l|laki)/i.test(genderRaw)
       ? "L"
-      : /^(f|female|p|perempuan)/i.test(fields.jenisKelamin || "")
+      : /^(f|female|p|perempuan)/i.test(genderRaw)
         ? "P"
         : "",
-    source: "entities",
+    source: "plain_text",
   };
 };
 
-const mergeOcrResults = (entityResult, mrzResult) => ({
-  noPaspor: mrzResult.noPaspor || entityResult.noPaspor || "",
-  tanggalLahir: mrzResult.tanggalLahir || entityResult.tanggalLahir || "",
-  pasporExpired: mrzResult.pasporExpired || entityResult.pasporExpired || "",
-  namaLengkap: entityResult.namaLengkap || mrzResult.namaLengkap || "",
-  jenisKelamin: mrzResult.jenisKelamin || entityResult.jenisKelamin || "",
-  source: mrzResult.noPaspor ? "mrz" : entityResult.source || "none",
+const mergeOcrResults = (textResult, mrzResult) => ({
+  noPaspor: mrzResult.noPaspor || textResult.noPaspor || "",
+  tanggalLahir: mrzResult.tanggalLahir || textResult.tanggalLahir || "",
+  pasporExpired: mrzResult.pasporExpired || textResult.pasporExpired || "",
+  namaLengkap: mrzResult.namaLengkap || textResult.namaLengkap || "",
+  jenisKelamin: mrzResult.jenisKelamin || textResult.jenisKelamin || "",
+  source: mrzResult.noPaspor ? "mrz" : textResult.source || "none",
 });
+
+const runLocalOcr = async (buffer) => {
+  const worker = await createWorker("eng", 1, {
+    cacheMethod: "none",
+    corePath: TESSERACT_CORE_PATH,
+    langPath: TESSERACT_LANG_PATH,
+    workerPath: TESSERACT_WORKER_PATH,
+  });
+
+  try {
+    const {
+      data: { text },
+    } = await worker.recognize(buffer);
+
+    return normalizeOcrText(text);
+  } finally {
+    await worker.terminate();
+  }
+};
 
 export async function POST(request) {
   try {
-    const config = getDocumentAiConfig();
-
     const formData = await request.formData();
     const file = formData.get("file");
 
@@ -308,29 +285,16 @@ export async function POST(request) {
     }
 
     if (file.type && !ACCEPTED_MIME_TYPES.has(file.type)) {
-      return NextResponse.json({ error: "Format wajib .jpeg, .jpg, .png, atau .pdf." }, { status: 400 });
+      return NextResponse.json({
+        error: "OCR lokal hanya mendukung foto paspor .jpeg, .jpg, atau .png. Untuk PDF, silakan isi data paspor manual.",
+      }, { status: 415 });
     }
 
-    const client = getDocumentAiClient(config);
-    const name = client.processorPath(
-      config.projectId,
-      config.location,
-      config.processorId
-    );
-
     const buffer = Buffer.from(await file.arrayBuffer());
-    const [result] = await client.processDocument({
-      name,
-      rawDocument: {
-        content: buffer.toString("base64"),
-        mimeType: file.type || "application/pdf",
-      },
-    });
-
-    const document = result.document;
-    const entityResult = parseEntities(document);
-    const mrzResult = parseMrz(document?.text);
-    const data = mergeOcrResults(entityResult, mrzResult);
+    const text = await runLocalOcr(buffer);
+    const textResult = parsePlainTextFields(text);
+    const mrzResult = parseMrz(text);
+    const data = mergeOcrResults(textResult, mrzResult);
 
     if (!data.noPaspor && !data.tanggalLahir && !data.pasporExpired) {
       return NextResponse.json({
@@ -341,16 +305,9 @@ export async function POST(request) {
 
     return NextResponse.json({ success: true, data });
   } catch (error) {
-    if (error instanceof DocumentAiConfigError) {
-      console.error("Passport OCR Config Error:", error.message);
-      return NextResponse.json({
-        error: error.message,
-      }, { status: 500 });
-    }
-
-    console.error("Passport OCR Error:", error);
+    console.error("Local Passport OCR Error:", error);
     return NextResponse.json({
-      error: "Gagal membaca data paspor melalui Document AI.",
+      error: "Gagal membaca data paspor melalui OCR lokal. Silakan isi manual.",
     }, { status: 500 });
   }
 }
