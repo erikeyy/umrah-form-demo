@@ -1,11 +1,19 @@
 import { NextResponse } from "next/server";
 import { DocumentProcessorServiceClient } from "@google-cloud/documentai";
 
-const REQUIRED_ENV = [
-  "DOCUMENT_AI_PROJECT_ID",
-  "DOCUMENT_AI_LOCATION",
-  "DOCUMENT_AI_PROCESSOR_ID",
-];
+export const runtime = "nodejs";
+
+const MAX_FILE_SIZE = 15 * 1024 * 1024;
+const ACCEPTED_MIME_TYPES = new Set(["image/jpeg", "image/png", "application/pdf"]);
+
+const CONFIG_ENV = {
+  projectId: ["DOCUMENT_AI_PROJECT_ID", "GOOGLE_CLOUD_PROJECT", "GOOGLE_PROJECT_ID"],
+  location: ["DOCUMENT_AI_LOCATION"],
+  processorId: ["DOCUMENT_AI_PROCESSOR_ID", "DOCUMENT_AI_PASSPORT_PROCESSOR_ID"],
+  serviceAccountJson: ["GOOGLE_SERVICE_ACCOUNT_JSON", "DOCUMENT_AI_SERVICE_ACCOUNT_JSON"],
+  clientEmail: ["DOCUMENT_AI_CLIENT_EMAIL", "GOOGLE_CLIENT_EMAIL"],
+  privateKey: ["DOCUMENT_AI_PRIVATE_KEY", "GOOGLE_PRIVATE_KEY"],
+};
 
 const FIELD_ALIASES = {
   noPaspor: [
@@ -58,29 +66,93 @@ const FIELD_ALIASES = {
   ],
 };
 
-const getDocumentAiClient = () => {
-  if (process.env.GOOGLE_SERVICE_ACCOUNT_JSON) {
-    const credentials = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+class DocumentAiConfigError extends Error {
+  constructor(message, details = []) {
+    super(message);
+    this.name = "DocumentAiConfigError";
+    this.details = details;
+  }
+}
+
+const getEnv = (keys) => {
+  for (const key of keys) {
+    const value = process.env[key]?.trim();
+    if (value) return value;
+  }
+  return "";
+};
+
+const parseServiceAccountJson = (rawJson) => {
+  if (!rawJson) return null;
+
+  try {
+    return JSON.parse(rawJson);
+  } catch {
+    throw new DocumentAiConfigError(
+      "Konfigurasi Document AI tidak valid.",
+      ["GOOGLE_SERVICE_ACCOUNT_JSON harus berupa JSON service account yang valid."]
+    );
+  }
+};
+
+const getDocumentAiConfig = () => {
+  const serviceAccountJson = getEnv(CONFIG_ENV.serviceAccountJson);
+  const credentials = parseServiceAccountJson(serviceAccountJson);
+  const projectId = getEnv(CONFIG_ENV.projectId) || credentials?.project_id || "";
+  const location = getEnv(CONFIG_ENV.location);
+  const processorId = getEnv(CONFIG_ENV.processorId);
+  const clientEmail = getEnv(CONFIG_ENV.clientEmail);
+  const privateKey = getEnv(CONFIG_ENV.privateKey);
+  const hasSplitCredentials = Boolean(clientEmail && privateKey);
+  const hasAdcCredentials = Boolean(process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim());
+
+  const missing = [];
+  if (!projectId) missing.push("DOCUMENT_AI_PROJECT_ID");
+  if (!location) missing.push("DOCUMENT_AI_LOCATION");
+  if (!processorId) missing.push("DOCUMENT_AI_PROCESSOR_ID");
+  if (!credentials && !hasSplitCredentials && !hasAdcCredentials) {
+    missing.push("GOOGLE_SERVICE_ACCOUNT_JSON atau DOCUMENT_AI_CLIENT_EMAIL + DOCUMENT_AI_PRIVATE_KEY");
+  }
+
+  if (missing.length > 0) {
+    throw new DocumentAiConfigError(
+      `Konfigurasi Document AI belum lengkap: ${missing.join(", ")}`,
+      missing
+    );
+  }
+
+  return {
+    projectId,
+    location,
+    processorId,
+    credentials,
+    clientEmail,
+    privateKey,
+  };
+};
+
+const getDocumentAiClient = ({ credentials, clientEmail, privateKey, projectId }) => {
+  if (credentials) {
     return new DocumentProcessorServiceClient({
       credentials: {
         client_email: credentials.client_email,
         private_key: credentials.private_key?.replace(/\\n/g, "\n"),
       },
-      projectId: credentials.project_id,
+      projectId,
     });
   }
 
-  if (process.env.DOCUMENT_AI_CLIENT_EMAIL && process.env.DOCUMENT_AI_PRIVATE_KEY) {
+  if (clientEmail && privateKey) {
     return new DocumentProcessorServiceClient({
       credentials: {
-        client_email: process.env.DOCUMENT_AI_CLIENT_EMAIL,
-        private_key: process.env.DOCUMENT_AI_PRIVATE_KEY.replace(/\\n/g, "\n"),
+        client_email: clientEmail,
+        private_key: privateKey.replace(/\\n/g, "\n"),
       },
-      projectId: process.env.DOCUMENT_AI_PROJECT_ID,
+      projectId,
     });
   }
 
-  return new DocumentProcessorServiceClient();
+  return new DocumentProcessorServiceClient({ projectId });
 };
 
 const normalizeKey = (value = "") => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
@@ -222,12 +294,7 @@ const mergeOcrResults = (entityResult, mrzResult) => ({
 
 export async function POST(request) {
   try {
-    const missingEnv = REQUIRED_ENV.filter((key) => !process.env[key]);
-    if (missingEnv.length > 0) {
-      return NextResponse.json({
-        error: `Konfigurasi Document AI belum lengkap: ${missingEnv.join(", ")}`,
-      }, { status: 500 });
-    }
+    const config = getDocumentAiConfig();
 
     const formData = await request.formData();
     const file = formData.get("file");
@@ -236,11 +303,19 @@ export async function POST(request) {
       return NextResponse.json({ error: "File paspor tidak ditemukan." }, { status: 400 });
     }
 
-    const client = getDocumentAiClient();
+    if (file.size > MAX_FILE_SIZE) {
+      return NextResponse.json({ error: "Ukuran file maksimal 15MB." }, { status: 400 });
+    }
+
+    if (file.type && !ACCEPTED_MIME_TYPES.has(file.type)) {
+      return NextResponse.json({ error: "Format wajib .jpeg, .jpg, .png, atau .pdf." }, { status: 400 });
+    }
+
+    const client = getDocumentAiClient(config);
     const name = client.processorPath(
-      process.env.DOCUMENT_AI_PROJECT_ID,
-      process.env.DOCUMENT_AI_LOCATION,
-      process.env.DOCUMENT_AI_PROCESSOR_ID
+      config.projectId,
+      config.location,
+      config.processorId
     );
 
     const buffer = Buffer.from(await file.arrayBuffer());
@@ -266,6 +341,13 @@ export async function POST(request) {
 
     return NextResponse.json({ success: true, data });
   } catch (error) {
+    if (error instanceof DocumentAiConfigError) {
+      console.error("Passport OCR Config Error:", error.message);
+      return NextResponse.json({
+        error: error.message,
+      }, { status: 500 });
+    }
+
     console.error("Passport OCR Error:", error);
     return NextResponse.json({
       error: "Gagal membaca data paspor melalui Document AI.",
