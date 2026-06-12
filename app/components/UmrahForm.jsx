@@ -49,12 +49,16 @@ export default function UmrahForm() {
   });
 
   const [family, setFamily] = useState([]);
-  const [files, setFiles] = useState({ ktp: null, paspor: null, pasporHal4: null });
+  const [documents, setDocuments] = useState({
+    primary: { ktp: null, paspor: null, pasporHal4: null },
+    family: {}
+  });
   const [hasPasporHal4, setHasPasporHal4] = useState(false);
   
-  const [isScanning, setIsScanning] = useState(false);
+  const [scanningKey, setScanningKey] = useState(null);
   const [ocrSuccess, setOcrSuccess] = useState(false);
   const [errors, setErrors] = useState({});
+  const isScanning = Boolean(scanningKey);
 
   const handlePrimaryChange = (e) => {
     const { name, value } = e.target;
@@ -75,54 +79,144 @@ export default function UmrahForm() {
         id: Date.now(), namaLengkap: '', nik: '', hubungan: '',
         noPaspor: '', pasporExpired: '', tanggalLahir: '',
         jenisKelamin: '', tempatLahir: '', statusPaspor: 'READY',
+        hasPasporHal4: false,
         ukuranSeragam: '', perlengkapanIbadah: '',
         alamatPengiriman: '', kontakPengiriman: ''
       }]);
     }
   };
 
-  const removeFamilyMember = (id) => setFamily(prev => prev.filter(member => member.id !== id));
+  const removeFamilyMember = (id) => {
+    setFamily(prev => prev.filter(member => member.id !== id));
+    setDocuments(prev => {
+      const nextFamilyDocuments = { ...prev.family };
+      delete nextFamilyDocuments[id];
+      return { ...prev, family: nextFamilyDocuments };
+    });
+  };
 
   const togglePasporHal4 = () => {
     setHasPasporHal4(!hasPasporHal4);
     if (hasPasporHal4) {
-      setFiles(prev => ({ ...prev, pasporHal4: null }));
+      setDocuments(prev => ({ ...prev, primary: { ...prev.primary, pasporHal4: null } }));
       setErrors(prev => ({ ...prev, pasporHal4: null }));
     }
   };
 
-  const simulatePassportOCR = (file) => {
-    setIsScanning(true);
-    setOcrSuccess(false);
-    setTimeout(() => {
-      setPrimary(prev => ({
-        ...prev,
-        namaLengkap: prev.namaLengkap || "ERIK JULIANTO",
-        noPaspor: "X1234567",
-        pasporExpired: "2031-06-10",
-        tanggalLahir: "1990-01-01",
-        jenisKelamin: "L"
-      }));
-      setIsScanning(false);
-      setOcrSuccess(true);
-      setErrors(prev => ({ ...prev, pasporExpired: null, noPaspor: null, namaLengkap: null, tanggalLahir: null, jenisKelamin: null, }));
-    }, 1500);
+  const toggleFamilyPasporHal4 = (id, index) => {
+    const member = family.find(item => item.id === id);
+    const nextValue = !member?.hasPasporHal4;
+
+    setFamily(prev => prev.map(item => item.id === id ? { ...item, hasPasporHal4: nextValue } : item));
+
+    if (!nextValue) {
+      setDocuments(prev => {
+        const currentMemberDocuments = prev.family[id] || { ktp: null, paspor: null, pasporHal4: null };
+        return {
+          ...prev,
+          family: {
+            ...prev.family,
+            [id]: { ...currentMemberDocuments, pasporHal4: null }
+          }
+        };
+      });
+      setErrors(prev => ({ ...prev, [`fam_${index}_pasporHal4`]: null }));
+    }
   };
 
-  const handleFileChange = (e, type) => {
+  const scanPassportOCR = async (file, options = {}) => {
+    const { owner = 'primary', memberId = null, index = null } = options;
+    const scanKey = owner === 'family' ? `family-${memberId}` : 'primary';
+
+    setScanningKey(scanKey);
+    if (owner === 'primary') setOcrSuccess(false);
+
+    try {
+      const formData = new window.FormData();
+      formData.append('file', file);
+
+      const response = await fetch('/api/ocr-passport', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Data paspor belum terbaca.');
+
+      const ocrData = result.data || {};
+
+      if (owner === 'family') {
+        setFamily(prev => prev.map(member => member.id === memberId ? {
+          ...member,
+          namaLengkap: ocrData.namaLengkap || member.namaLengkap,
+          noPaspor: ocrData.noPaspor || member.noPaspor,
+          pasporExpired: ocrData.pasporExpired || member.pasporExpired,
+          tanggalLahir: ocrData.tanggalLahir || member.tanggalLahir,
+          jenisKelamin: ocrData.jenisKelamin || member.jenisKelamin,
+        } : member));
+        setErrors(prev => ({
+          ...prev,
+          [`fam_${index}_paspor`]: null,
+          [`fam_${index}_noPaspor`]: null,
+          [`fam_${index}_pasporExpired`]: null,
+          [`fam_${index}_tanggalLahir`]: null,
+          [`fam_${index}_jenisKelamin`]: null,
+          [`fam_${index}_ocr`]: null,
+        }));
+      } else {
+        setPrimary(prev => ({
+          ...prev,
+          namaLengkap: ocrData.namaLengkap || prev.namaLengkap,
+          noPaspor: ocrData.noPaspor || prev.noPaspor,
+          pasporExpired: ocrData.pasporExpired || prev.pasporExpired,
+          tanggalLahir: ocrData.tanggalLahir || prev.tanggalLahir,
+          jenisKelamin: ocrData.jenisKelamin || prev.jenisKelamin,
+        }));
+        setOcrSuccess(true);
+        setErrors(prev => ({ ...prev, ocr: null, pasporExpired: null, noPaspor: null, namaLengkap: null, tanggalLahir: null, jenisKelamin: null }));
+      }
+    } catch (err) {
+      if (owner === 'family') {
+        setErrors(prev => ({ ...prev, [`fam_${index}_ocr`]: err.message || 'Data paspor belum terbaca. Silakan isi manual.' }));
+      } else {
+        setOcrSuccess(true);
+        setErrors(prev => ({ ...prev, ocr: err.message || 'Data paspor belum terbaca. Silakan isi manual.' }));
+      }
+    } finally {
+      setScanningKey(null);
+    }
+  };
+
+  const getFamilyDocuments = (id) => documents.family[id] || { ktp: null, paspor: null, pasporHal4: null };
+
+  const handleFileChange = (e, type, options = {}) => {
+    const { owner = 'primary', memberId = null, errorKey = type } = options;
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > MAX_FILE_SIZE) {
-      setErrors(prev => ({ ...prev, [type]: 'Ukuran file maksimal 15MB!' }));
+      setErrors(prev => ({ ...prev, [errorKey]: 'Ukuran file maksimal 15MB!' }));
       return;
     }
     if (!ACCEPTED_FILE_TYPES.includes(file.type)) {
-      setErrors(prev => ({ ...prev, [type]: 'Format wajib .jpeg, .jpg, .png, atau .pdf!' }));
+      setErrors(prev => ({ ...prev, [errorKey]: 'Format wajib .jpeg, .jpg, .png, atau .pdf!' }));
       return;
     }
-    setFiles(prev => ({ ...prev, [type]: file }));
-    setErrors(prev => ({ ...prev, [type]: null }));
-    if (type === 'paspor') simulatePassportOCR(file);
+    setDocuments(prev => {
+      if (owner === 'family') {
+        const currentMemberDocuments = prev.family[memberId] || { ktp: null, paspor: null, pasporHal4: null };
+        return {
+          ...prev,
+          family: {
+            ...prev.family,
+            [memberId]: { ...currentMemberDocuments, [type]: file }
+          }
+        };
+      }
+
+      return { ...prev, primary: { ...prev.primary, [type]: file } };
+    });
+    setErrors(prev => ({ ...prev, [errorKey]: null }));
+    if (type === 'paspor') scanPassportOCR(file, { owner, memberId, index: options.index });
   };
 
   const validateStep1 = () => {
@@ -132,6 +226,8 @@ export default function UmrahForm() {
 
     family.forEach((member, index) => {
       if (!member.hubungan) newErrors[`fam_${index}_hub`] = "Hubungan wajib diisi";
+      if (!/^\d{16}$/.test(member.nik)) newErrors[`fam_${index}_nik`] = "NIK wajib 16 digit angka";
+      if (member.namaLengkap.length < 3) newErrors[`fam_${index}_namaLengkap`] = "Nama wajib diisi";
     });
     
     setErrors(newErrors);
@@ -144,19 +240,35 @@ export default function UmrahForm() {
 
   const validateStep3 = () => {
     const newErrors = {};
-    if (!files.ktp) newErrors.ktp = "KTP wajib diupload";
+    if (!documents.primary.ktp) newErrors.ktp = "KTP wajib diupload";
     
     if (primary.statusPaspor === 'READY') {
-      if (!files.paspor) newErrors.paspor = "Paspor wajib diupload";
+      if (!documents.primary.paspor) newErrors.paspor = "Paspor wajib diupload";
       if (!primary.noPaspor) newErrors.noPaspor = "Nomor paspor wajib diisi";
       if (!isValidPassport(primary.pasporExpired)) newErrors.pasporExpired = "Paspor harus berlaku > 6 bulan";
     }
 
-    if (hasPasporHal4 && !files.pasporHal4) newErrors.pasporHal4 = "File Halaman 4 wajib diupload (opsi tercentang)";
+    if (hasPasporHal4 && !documents.primary.pasporHal4) newErrors.pasporHal4 = "File Halaman 4 wajib diupload (opsi tercentang)";
     
     if (primary.namaLengkap.length < 3) newErrors.namaLengkap = "Nama harus diperiksa & dilengkapi";
     if (!primary.tanggalLahir) newErrors.tanggalLahir = "Tanggal lahir wajib diisi";
     if (!primary.jenisKelamin) newErrors.jenisKelamin = "Jenis kelamin wajib dipilih";
+
+    family.forEach((member, index) => {
+      const memberDocuments = getFamilyDocuments(member.id);
+      if (!memberDocuments.ktp) newErrors[`fam_${index}_ktp`] = "KTP anggota wajib diupload";
+
+      if (member.statusPaspor === 'READY') {
+        if (!memberDocuments.paspor) newErrors[`fam_${index}_paspor`] = "Paspor anggota wajib diupload";
+        if (!member.noPaspor) newErrors[`fam_${index}_noPaspor`] = "Nomor paspor wajib diisi";
+        if (!isValidPassport(member.pasporExpired)) newErrors[`fam_${index}_pasporExpired`] = "Paspor harus berlaku > 6 bulan";
+      }
+
+      if (member.hasPasporHal4 && !memberDocuments.pasporHal4) newErrors[`fam_${index}_pasporHal4`] = "File Halaman 4 wajib diupload";
+      if (member.namaLengkap.length < 3) newErrors[`fam_${index}_namaLengkap`] = "Nama harus diperiksa & dilengkapi";
+      if (!member.tanggalLahir) newErrors[`fam_${index}_tanggalLahir`] = "Tanggal lahir wajib diisi";
+      if (!member.jenisKelamin) newErrors[`fam_${index}_jenisKelamin`] = "Jenis kelamin wajib dipilih";
+    });
     
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -213,9 +325,18 @@ export default function UmrahForm() {
       formData.append("pendaftarUtama", JSON.stringify(pendaftarUtamaPayload));
       formData.append("keluarga", JSON.stringify(family));
 
-      if (files.ktp) formData.append("utama_ktp", files.ktp);
-      if (files.paspor) formData.append("utama_paspor", files.paspor);
-      if (hasPasporHal4 && files.pasporHal4) formData.append("utama_paspor_hal4", files.pasporHal4);
+      if (documents.primary.ktp) formData.append("utama_ktp", documents.primary.ktp);
+      if (documents.primary.paspor) formData.append("utama_paspor", documents.primary.paspor);
+      if (hasPasporHal4 && documents.primary.pasporHal4) formData.append("utama_paspor_hal4", documents.primary.pasporHal4);
+      if (primary.statusPaspor === 'PENDING' && documents.primary.pasporHal4) formData.append("utama_resi_paspor", documents.primary.pasporHal4);
+
+      family.forEach((member, index) => {
+        const memberDocuments = getFamilyDocuments(member.id);
+        if (memberDocuments.ktp) formData.append(`keluarga_${index}_ktp`, memberDocuments.ktp);
+        if (memberDocuments.paspor) formData.append(`keluarga_${index}_paspor`, memberDocuments.paspor);
+        if (member.hasPasporHal4 && memberDocuments.pasporHal4) formData.append(`keluarga_${index}_paspor_hal4`, memberDocuments.pasporHal4);
+        if (member.statusPaspor === 'PENDING' && memberDocuments.pasporHal4) formData.append(`keluarga_${index}_resi_paspor`, memberDocuments.pasporHal4);
+      });
 
       const response = await fetch("/api/register", {
         method: "POST",
@@ -399,10 +520,12 @@ export default function UmrahForm() {
                           <div>
                             <label className="block text-sm font-medium text-slate-700 mb-1">NIK KTP (16 Digit)</label>
                             <input type="text" value={member.nik} onChange={(e) => handleFamilyChange(member.id, 'nik', e.target.value)} maxLength="16" className="w-full border border-slate-300 rounded-lg p-3 outline-none focus:ring-2 focus:ring-[#6D28D9] transition-all" placeholder="Masukkan NIK" />
+                            {errors[`fam_${index}_nik`] && <span className="text-red-500 text-xs mt-1 flex items-center"><AlertCircle className="w-3 h-3 mr-1"/>{errors[`fam_${index}_nik`]}</span>}
                           </div>
                           <div className="md:col-span-2">
                             <label className="block text-sm font-medium text-slate-700 mb-1">Nama Lengkap</label>
                             <input type="text" value={member.namaLengkap} onChange={(e) => handleFamilyChange(member.id, 'namaLengkap', e.target.value)} className="w-full border border-slate-300 rounded-lg p-3 outline-none focus:ring-2 focus:ring-[#6D28D9] transition-all" placeholder="Nama sesuai KTP" />
+                            {errors[`fam_${index}_namaLengkap`] && <span className="text-red-500 text-xs mt-1 flex items-center"><AlertCircle className="w-3 h-3 mr-1"/>{errors[`fam_${index}_namaLengkap`]}</span>}
                           </div>
                           
                           {/* SAKLAR PASPOR KELUARGA */}
@@ -477,8 +600,8 @@ export default function UmrahForm() {
                   {/* UPLOAD KTP */}
                   <div className="space-y-2">
                     <label className="block text-sm font-semibold text-slate-700">Foto KTP Utama</label>
-                    <label className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-2xl cursor-pointer transition-colors ${files.ktp ? 'border-green-400 bg-green-50' : 'border-slate-300 bg-slate-50 hover:bg-slate-100'}`}>
-                      {files.ktp ? <p className="text-sm text-green-700 font-medium px-4 text-center line-clamp-2">{files.ktp.name}</p> : <><UploadCloud className="w-8 h-8 text-slate-400 mb-2" /><p className="text-sm text-slate-500">Upload KTP</p></>}
+                    <label className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-2xl cursor-pointer transition-colors ${documents.primary.ktp ? 'border-green-400 bg-green-50' : 'border-slate-300 bg-slate-50 hover:bg-slate-100'}`}>
+                      {documents.primary.ktp ? <p className="text-sm text-green-700 font-medium px-4 text-center line-clamp-2">{documents.primary.ktp.name}</p> : <><UploadCloud className="w-8 h-8 text-slate-400 mb-2" /><p className="text-sm text-slate-500">Upload KTP</p></>}
                       <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => handleFileChange(e, 'ktp')} />
                     </label>
                     {errors.ktp && <p className="text-red-500 text-xs">{errors.ktp}</p>}
@@ -488,22 +611,23 @@ export default function UmrahForm() {
                   {primary.statusPaspor === 'READY' ? (
                     <div className="space-y-2 animate-in fade-in duration-200">
                       <label className="block text-sm font-semibold text-slate-700 flex items-center">Foto Paspor Utama <Scan size={14} className="ml-1 text-[#6D28D9]" /></label>
-                      <label className={`relative flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-2xl cursor-pointer overflow-hidden transition-colors ${files.paspor && !isScanning ? 'border-green-400 bg-green-50' : isScanning ? 'border-[#6D28D9] bg-[#6D28D9]/5' : 'border-slate-300 bg-slate-50 hover:bg-slate-100'}`}>
+                      <label className={`relative flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-2xl cursor-pointer overflow-hidden transition-colors ${documents.primary.paspor && scanningKey !== 'primary' ? 'border-green-400 bg-green-50' : scanningKey === 'primary' ? 'border-[#6D28D9] bg-[#6D28D9]/5' : 'border-slate-300 bg-slate-50 hover:bg-slate-100'}`}>
                         <div className="flex flex-col items-center justify-center z-10">
-                          {isScanning ? <><Loader2 className="w-8 h-8 text-[#6D28D9] animate-spin mb-2" /><p className="text-sm text-[#6D28D9] font-semibold">Membaca Data...</p></>
-                          : files.paspor ? <p className="text-sm text-green-700 font-medium text-center px-4 line-clamp-2">{files.paspor.name}</p>
+                          {scanningKey === 'primary' ? <><Loader2 className="w-8 h-8 text-[#6D28D9] animate-spin mb-2" /><p className="text-sm text-[#6D28D9] font-semibold">Membaca Data...</p></>
+                          : documents.primary.paspor ? <p className="text-sm text-green-700 font-medium text-center px-4 line-clamp-2">{documents.primary.paspor.name}</p>
                           : <><FileText className="w-8 h-8 text-slate-400 mb-2" /><p className="text-sm text-slate-500">Upload Paspor</p></>}
                         </div>
-                        {isScanning && <div className="absolute top-0 left-0 w-full h-1 bg-[#6D28D9] shadow-[0_0_8px_#6D28D9] animate-scan" />}
-                        <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => handleFileChange(e, 'paspor')} disabled={isScanning} />
+                        {scanningKey === 'primary' && <div className="absolute top-0 left-0 w-full h-1 bg-[#6D28D9] shadow-[0_0_8px_#6D28D9] animate-scan" />}
+                        <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => handleFileChange(e, 'paspor')} disabled={scanningKey === 'primary'} />
                       </label>
                       {errors.paspor && <p className="text-red-500 text-xs">{errors.paspor}</p>}
+                      {errors.ocr && <p className="text-amber-600 text-xs">{errors.ocr}</p>}
                     </div>
                   ) : (
                     <div className="space-y-2 animate-in fade-in duration-200">
                       <label className="block text-sm font-semibold text-slate-700">Foto Bukti Resi Pendaftaran Imigrasi (Opsional)</label>
-                      <label className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-2xl cursor-pointer transition-colors ${files.pasporHal4 ? 'border-amber-400 bg-amber-50' : 'border-slate-200 bg-slate-50/50 hover:bg-slate-100'}`}>
-                        {files.pasporHal4 ? <p className="text-xs text-amber-700 font-medium px-4 text-center line-clamp-2">{files.pasporHal4.name}</p> : <><FileText className="w-8 h-8 text-slate-300 mb-2" /><p className="text-sm text-slate-400">Upload Berkas Resi (Jika ada)</p></>}
+                      <label className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-2xl cursor-pointer transition-colors ${documents.primary.pasporHal4 ? 'border-amber-400 bg-amber-50' : 'border-slate-200 bg-slate-50/50 hover:bg-slate-100'}`}>
+                        {documents.primary.pasporHal4 ? <p className="text-xs text-amber-700 font-medium px-4 text-center line-clamp-2">{documents.primary.pasporHal4.name}</p> : <><FileText className="w-8 h-8 text-slate-300 mb-2" /><p className="text-sm text-slate-400">Upload Berkas Resi (Jika ada)</p></>}
                         <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => handleFileChange(e, 'pasporHal4')} />
                       </label>
                       <p className="text-[11px] text-slate-400 italic">*Langkah ini bisa dilewati jika belum melakukan wawancara/foto di kantor Imigrasi.</p>
@@ -572,13 +696,135 @@ export default function UmrahForm() {
                     </label>
                     {hasPasporHal4 && (
                       <div className="mt-4 animate-in fade-in duration-150">
-                        <label className={`flex flex-col items-center justify-center w-full h-24 border-2 border-dashed rounded-xl cursor-pointer ${files.pasporHal4 ? 'border-purple-400 bg-purple-50' : 'border-purple-200 bg-white'}`}>
-                          {files.pasporHal4 ? <p className="text-xs text-purple-700 font-medium">{files.pasporHal4.name}</p> : <p className="text-xs text-purple-600">Upload Halaman 4 Paspor</p>}
+                        <label className={`flex flex-col items-center justify-center w-full h-24 border-2 border-dashed rounded-xl cursor-pointer ${documents.primary.pasporHal4 ? 'border-purple-400 bg-purple-50' : 'border-purple-200 bg-white'}`}>
+                          {documents.primary.pasporHal4 ? <p className="text-xs text-purple-700 font-medium">{documents.primary.pasporHal4.name}</p> : <p className="text-xs text-purple-600">Upload Halaman 4 Paspor</p>}
                           <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => handleFileChange(e, 'pasporHal4')} />
                         </label>
                         {errors.pasporHal4 && <p className="text-red-500 text-xs mt-1">{errors.pasporHal4}</p>}
                       </div>
                     )}
+                  </div>
+                )}
+
+                {family.length > 0 && (
+                  <div className="mt-8 pt-6 border-t border-slate-200 space-y-6">
+                    <div>
+                      <h3 className="text-lg font-bold text-slate-800">Dokumen Anggota Keluarga</h3>
+                      <p className="text-sm text-slate-500 mt-1">Upload dokumen dan validasi data untuk setiap anggota rombongan.</p>
+                    </div>
+
+                    {family.map((member, index) => {
+                      const memberDocuments = getFamilyDocuments(member.id);
+                      return (
+                        <div key={member.id} className="border border-slate-200 rounded-2xl p-5 bg-white shadow-sm">
+                          <div className="mb-5">
+                            <p className="text-xs font-bold text-[#6D28D9] uppercase tracking-wide">{member.hubungan || `Anggota #${index + 1}`}</p>
+                            <h4 className="text-lg font-bold text-slate-800 mt-1">{member.namaLengkap || `Anggota #${index + 1}`}</h4>
+                          </div>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <label className="block text-sm font-semibold text-slate-700">Foto KTP Anggota</label>
+                              <label className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-2xl cursor-pointer transition-colors ${memberDocuments.ktp ? 'border-green-400 bg-green-50' : 'border-slate-300 bg-slate-50 hover:bg-slate-100'}`}>
+                                {memberDocuments.ktp ? <p className="text-sm text-green-700 font-medium px-4 text-center line-clamp-2">{memberDocuments.ktp.name}</p> : <><UploadCloud className="w-8 h-8 text-slate-400 mb-2" /><p className="text-sm text-slate-500">Upload KTP</p></>}
+                                <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => handleFileChange(e, 'ktp', { owner: 'family', memberId: member.id, errorKey: `fam_${index}_ktp` })} />
+                              </label>
+                              {errors[`fam_${index}_ktp`] && <p className="text-red-500 text-xs">{errors[`fam_${index}_ktp`]}</p>}
+                            </div>
+
+                            {member.statusPaspor === 'READY' ? (
+                              <div className="space-y-2">
+                                <label className="block text-sm font-semibold text-slate-700">Foto Paspor Anggota</label>
+                                <label className={`relative flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-2xl cursor-pointer overflow-hidden transition-colors ${memberDocuments.paspor && scanningKey !== `family-${member.id}` ? 'border-green-400 bg-green-50' : scanningKey === `family-${member.id}` ? 'border-[#6D28D9] bg-[#6D28D9]/5' : 'border-slate-300 bg-slate-50 hover:bg-slate-100'}`}>
+                                  {scanningKey === `family-${member.id}` ? <><Loader2 className="w-8 h-8 text-[#6D28D9] animate-spin mb-2" /><p className="text-sm text-[#6D28D9] font-semibold">Membaca Data...</p></>
+                                  : memberDocuments.paspor ? <p className="text-sm text-green-700 font-medium px-4 text-center line-clamp-2">{memberDocuments.paspor.name}</p>
+                                  : <><FileText className="w-8 h-8 text-slate-400 mb-2" /><p className="text-sm text-slate-500">Upload Paspor</p></>}
+                                  {scanningKey === `family-${member.id}` && <div className="absolute top-0 left-0 w-full h-1 bg-[#6D28D9] shadow-[0_0_8px_#6D28D9] animate-scan" />}
+                                  <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => handleFileChange(e, 'paspor', { owner: 'family', memberId: member.id, errorKey: `fam_${index}_paspor`, index })} disabled={scanningKey === `family-${member.id}`} />
+                                </label>
+                                {errors[`fam_${index}_paspor`] && <p className="text-red-500 text-xs">{errors[`fam_${index}_paspor`]}</p>}
+                                {errors[`fam_${index}_ocr`] && <p className="text-amber-600 text-xs">{errors[`fam_${index}_ocr`]}</p>}
+                              </div>
+                            ) : (
+                              <div className="space-y-2">
+                                <label className="block text-sm font-semibold text-slate-700">Foto Bukti Resi Pendaftaran Imigrasi (Opsional)</label>
+                                <label className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-2xl cursor-pointer transition-colors ${memberDocuments.pasporHal4 ? 'border-amber-400 bg-amber-50' : 'border-slate-200 bg-slate-50/50 hover:bg-slate-100'}`}>
+                                  {memberDocuments.pasporHal4 ? <p className="text-xs text-amber-700 font-medium px-4 text-center line-clamp-2">{memberDocuments.pasporHal4.name}</p> : <><FileText className="w-8 h-8 text-slate-300 mb-2" /><p className="text-sm text-slate-400">Upload Berkas Resi (Jika ada)</p></>}
+                                  <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => handleFileChange(e, 'pasporHal4', { owner: 'family', memberId: member.id, errorKey: `fam_${index}_pasporHal4` })} />
+                                </label>
+                                <p className="text-[11px] text-slate-400 italic">*Langkah ini bisa dilewati jika belum melakukan wawancara/foto di kantor Imigrasi.</p>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="mt-5 bg-[#6D28D9]/5 border border-[#6D28D9]/20 rounded-2xl p-5 space-y-3">
+                            <div className="flex items-center text-[#6D28D9] font-bold mb-1">
+                              <Scan size={18} className="mr-2" /> {member.statusPaspor === 'READY' ? 'Verifikasi Data Paspor Anggota' : 'Lengkapi Data Identitas Anggota'}
+                            </div>
+
+                            <div>
+                              <label className="block text-xs font-semibold text-slate-700 mb-1">Nama Sesuai KTP / Paspor</label>
+                              <input type="text" value={member.namaLengkap} onChange={(e) => handleFamilyChange(member.id, 'namaLengkap', e.target.value)} className="w-full p-2.5 rounded-lg border border-purple-200 outline-none text-sm uppercase font-medium" />
+                              {errors[`fam_${index}_namaLengkap`] && <p className="text-red-500 text-xs mt-0.5">{errors[`fam_${index}_namaLengkap`]}</p>}
+                            </div>
+
+                            {member.statusPaspor === 'READY' && (
+                              <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                  <label className="block text-xs font-semibold text-slate-700 mb-1">Nomor Paspor</label>
+                                  <input type="text" value={member.noPaspor} onChange={(e) => handleFamilyChange(member.id, 'noPaspor', e.target.value)} className="w-full p-2.5 rounded-lg border border-purple-200 outline-none text-sm uppercase tracking-wider font-medium" />
+                                  {errors[`fam_${index}_noPaspor`] && <p className="text-red-500 text-xs mt-0.5">{errors[`fam_${index}_noPaspor`]}</p>}
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-semibold text-slate-700 mb-1">Tanggal Kedaluwarsa</label>
+                                  <input type="date" value={member.pasporExpired} onChange={(e) => handleFamilyChange(member.id, 'pasporExpired', e.target.value)} className="w-full p-2.5 rounded-lg border border-purple-200 outline-none text-sm font-medium" />
+                                  {errors[`fam_${index}_pasporExpired`] && <p className="text-red-500 text-xs mt-0.5">{errors[`fam_${index}_pasporExpired`]}</p>}
+                                </div>
+                              </div>
+                            )}
+
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-700 mb-1">Tanggal Lahir</label>
+                                <input type="date" value={member.tanggalLahir || ""} onChange={(e) => handleFamilyChange(member.id, 'tanggalLahir', e.target.value)} className="w-full p-2.5 rounded-lg border border-purple-200 outline-none text-sm font-medium" />
+                                {errors[`fam_${index}_tanggalLahir`] && <p className="text-red-500 text-xs mt-0.5">{errors[`fam_${index}_tanggalLahir`]}</p>}
+                              </div>
+                              <div>
+                                <label className="block text-xs font-semibold text-slate-700 mb-1">Jenis Kelamin</label>
+                                <select value={member.jenisKelamin || ""} onChange={(e) => handleFamilyChange(member.id, 'jenisKelamin', e.target.value)} className="w-full p-2.5 rounded-lg border border-purple-200 outline-none text-sm font-medium bg-white">
+                                  <option value="">Pilih...</option>
+                                  <option value="L">Laki-laki (Male)</option>
+                                  <option value="P">Perempuan (Female)</option>
+                                </select>
+                                {errors[`fam_${index}_jenisKelamin`] && <p className="text-red-500 text-xs mt-0.5">{errors[`fam_${index}_jenisKelamin`]}</p>}
+                              </div>
+                            </div>
+                          </div>
+
+                          {member.statusPaspor === 'READY' && (
+                            <div className="mt-5 p-4 border border-slate-200 rounded-2xl bg-slate-50">
+                              <label className="flex items-start cursor-pointer group">
+                                <button type="button" onClick={() => toggleFamilyPasporHal4(member.id, index)} className="mt-0.5 text-[#6D28D9] flex-shrink-0 transition-transform group-hover:scale-110">
+                                  {member.hasPasporHal4 ? <CheckSquare size={20} /> : <Square size={20} />}
+                                </button>
+                                <div className="ml-3">
+                                  <span className="block text-sm font-semibold text-slate-800">Terdapat Penambahan Nama (Halaman 4 Paspor)</span>
+                                </div>
+                              </label>
+                              {member.hasPasporHal4 && (
+                                <div className="mt-4">
+                                  <label className={`flex flex-col items-center justify-center w-full h-24 border-2 border-dashed rounded-xl cursor-pointer ${memberDocuments.pasporHal4 ? 'border-purple-400 bg-purple-50' : 'border-purple-200 bg-white'}`}>
+                                    {memberDocuments.pasporHal4 ? <p className="text-xs text-purple-700 font-medium">{memberDocuments.pasporHal4.name}</p> : <p className="text-xs text-purple-600">Upload Halaman 4 Paspor</p>}
+                                    <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => handleFileChange(e, 'pasporHal4', { owner: 'family', memberId: member.id, errorKey: `fam_${index}_pasporHal4` })} />
+                                  </label>
+                                  {errors[`fam_${index}_pasporHal4`] && <p className="text-red-500 text-xs mt-1">{errors[`fam_${index}_pasporHal4`]}</p>}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
 

@@ -23,6 +23,12 @@ export async function POST(request) {
     const pendaftarUtama = JSON.parse(formData.get("pendaftarUtama"));
     const keluarga = JSON.parse(formData.get("keluarga") || "[]");
     const projectPartner = formData.get("project_partner"); // [37]
+    const utamaFiles = {
+      ktp: formData.get("utama_ktp"),
+      paspor: formData.get("utama_paspor"),
+      pasporHal4: formData.get("utama_paspor_hal4"),
+      resiPaspor: formData.get("utama_resi_paspor"),
+    };
 
     // Generate ID Rombongan Unik
     const ID_PENDAFTARAN_GRUP = `RIDA-${crypto.randomBytes(4).toString("hex")}`;
@@ -52,9 +58,9 @@ export async function POST(request) {
       pendaftarUtama.statusPaspor === 'READY' ? pendaftarUtama.pasporExpired : "-",   // J
       pendaftarUtama.tanggalLahir || "-",  // K [44]
       pendaftarUtama.jenisKelamin || "-",  // L
-      "URL_KTP_DRIVE",                     // M
-      "URL_PASPOR_UTAMA_DRIVE",            // N
-      "URL_PASPOR_HAL4_DRIVE",             // O
+      utamaFiles.ktp ? "URL_KTP_DRIVE" : "-", // M
+      utamaFiles.paspor ? "URL_PASPOR_UTAMA_DRIVE" : (utamaFiles.resiPaspor ? "URL_RESI_PASPOR_UTAMA_DRIVE" : "-"), // N
+      utamaFiles.pasporHal4 ? "URL_PASPOR_HAL4_DRIVE" : "-", // O
       pendaftarUtama.ukuranSeragam || "-", // P
       deliveryLabel(pendaftarUtama.perlengkapanIbadah), // Q
       pendaftarUtama.alamatPengiriman || "-",   // R
@@ -62,7 +68,14 @@ export async function POST(request) {
     ]); // [36, 37, 45]
 
     // Baris 2 - 5: Anggota Keluarga (Di-loop secara dinamis)
-    keluarga.forEach((anggota) => {
+    keluarga.forEach((anggota, index) => {
+      const anggotaFiles = {
+        ktp: formData.get(`keluarga_${index}_ktp`),
+        paspor: formData.get(`keluarga_${index}_paspor`),
+        pasporHal4: formData.get(`keluarga_${index}_paspor_hal4`),
+        resiPaspor: formData.get(`keluarga_${index}_resi_paspor`),
+      };
+
       sheetValues.push([
         ID_PENDAFTARAN_GRUP,
         WAKTU_DAFTAR,
@@ -76,9 +89,9 @@ export async function POST(request) {
         anggota.statusPaspor === 'READY' ? anggota.pasporExpired : "-",
         anggota.tanggalLahir || "-",
         anggota.jenisKelamin || "-",
-        "URL_KTP_KELUARGA_DRIVE",
-        "URL_PASPOR_KELUARGA_DRIVE",
-        "-",
+        anggotaFiles.ktp ? "URL_KTP_KELUARGA_DRIVE" : "-",
+        anggotaFiles.paspor ? "URL_PASPOR_KELUARGA_DRIVE" : (anggotaFiles.resiPaspor ? "URL_RESI_PASPOR_KELUARGA_DRIVE" : "-"),
+        anggotaFiles.pasporHal4 ? "URL_PASPOR_HAL4_KELUARGA_DRIVE" : "-",
         anggota.ukuranSeragam || "-",
         deliveryLabel(anggota.perlengkapanIbadah),
         anggota.alamatPengiriman || "-",
