@@ -4,6 +4,13 @@ import crypto from "crypto"; // Untuk ID_PENDAFTARAN_GRUP acak [38]
 import { Readable } from "node:stream";
 
 const MAX_FAMILY_MEMBERS = 4;
+const ACCEPTED_DOCUMENT_MIME_TYPES = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "application/pdf",
+]);
+const ACCEPTED_DOCUMENT_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".pdf"]);
 
 const deliveryLabel = (value) => {
   if (value === "DIKIRIM") return "Dikirim ke Alamat Tempat Tinggal";
@@ -128,9 +135,20 @@ const getFileExtension = (file) => {
   return "";
 };
 
+const assertAcceptedDocumentFile = (file) => {
+  const extension = getFileExtension(file);
+  const hasAcceptedMime = !file.type || ACCEPTED_DOCUMENT_MIME_TYPES.has(file.type);
+  const hasAcceptedExtension = ACCEPTED_DOCUMENT_EXTENSIONS.has(extension);
+
+  if (!hasAcceptedMime || !hasAcceptedExtension) {
+    throw new BadRequestError("Format dokumen wajib PNG, JPG, JPEG, atau PDF.");
+  }
+};
+
 const uploadFileToDrive = async (drive, file, { folderId, groupId, participantName, documentType }) => {
   if (!isUploadedFile(file)) return "-";
   if (!folderId) throw new Error("GOOGLE_DRIVE_FOLDER_ID belum dikonfigurasi.");
+  assertAcceptedDocumentFile(file);
 
   const buffer = Buffer.from(await file.arrayBuffer());
   const extension = getFileExtension(file);

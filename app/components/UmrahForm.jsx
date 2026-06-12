@@ -5,7 +5,8 @@ import { useSearchParams } from 'next/navigation';
 import { UploadCloud, CheckCircle2, AlertCircle, Plus, Trash2, ChevronRight, ChevronLeft, FileText, CheckSquare, Square, Scan, Loader2, ShieldCheck } from 'lucide-react';
 
 const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15MB
-const ACCEPTED_FILE_TYPES = ['image/jpeg', 'image/png', 'application/pdf'];
+const ACCEPTED_FILE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'];
+const OCR_FILE_TYPES = ['image/jpeg', 'image/jpg', 'image/png'];
 const TOTAL_STEPS = 4;
 const MAX_FAMILY_MEMBERS = 4;
 const SERAGAM_OPTIONS = [
@@ -50,6 +51,31 @@ const normalizeParticipantData = (participant) => ({
 
 const isParticipantObject = (value) =>
   value !== null && typeof value === "object" && !Array.isArray(value);
+
+const readApiResponse = async (response, fallbackMessage) => {
+  const contentType = response.headers.get("content-type") || "";
+
+  if (contentType.includes("application/json")) {
+    try {
+      return await response.json();
+    } catch {
+      throw new Error(fallbackMessage);
+    }
+  }
+
+  const bodyText = await response.text().catch(() => "");
+  console.error("Unexpected non-JSON response:", {
+    status: response.status,
+    contentType,
+    bodyPreview: bodyText.slice(0, 200),
+  });
+
+  throw new Error(
+    response.status === 413
+      ? "Ukuran total file terlalu besar untuk server. Kompres dokumen atau upload file yang lebih kecil."
+      : fallbackMessage
+  );
+};
 
 // Fungsi Validasi Masa Berlaku Paspor
 const isValidPassport = (dateString) => {
@@ -164,6 +190,10 @@ export default function UmrahForm() {
     if (owner === 'primary') setOcrSuccess(false);
 
     try {
+      if (!OCR_FILE_TYPES.includes(file.type)) {
+        throw new Error('OCR otomatis hanya mendukung JPG/JPEG/PNG. Untuk PDF, silakan isi data paspor manual.');
+      }
+
       const formData = new window.FormData();
       formData.append('file', file);
 
@@ -172,7 +202,7 @@ export default function UmrahForm() {
         body: formData,
       });
 
-      const result = await response.json();
+      const result = await readApiResponse(response, 'Data paspor belum terbaca. Silakan isi manual.');
       if (!response.ok) throw new Error(result.error || 'Data paspor belum terbaca.');
 
       const ocrData = result.data || {};
@@ -406,7 +436,7 @@ export default function UmrahForm() {
         body: formData,
       });
 
-      const result = await response.json();
+      const result = await readApiResponse(response, "Gagal mengirim pendaftaran ke server.");
       if (!response.ok) throw new Error(result.error || "Gagal mengirim pendaftaran ke server.");
       
       setIsSuccess(true);

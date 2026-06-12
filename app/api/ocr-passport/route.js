@@ -5,7 +5,8 @@ import { createWorker } from "tesseract.js";
 export const runtime = "nodejs";
 
 const MAX_FILE_SIZE = 15 * 1024 * 1024;
-const ACCEPTED_MIME_TYPES = new Set(["image/jpeg", "image/png"]);
+const OCR_MIME_TYPES = new Set(["image/jpeg", "image/jpg", "image/png"]);
+const ACCEPTED_MIME_TYPES = new Set([...OCR_MIME_TYPES, "application/pdf"]);
 const TESSERACT_LANG_PATH = path.join(
   process.cwd(),
   "node_modules",
@@ -286,8 +287,22 @@ export async function POST(request) {
 
     if (file.type && !ACCEPTED_MIME_TYPES.has(file.type)) {
       return NextResponse.json({
-        error: "OCR lokal hanya mendukung foto paspor .jpeg, .jpg, atau .png. Untuk PDF, silakan isi data paspor manual.",
+        error: "Format wajib .jpeg, .jpg, .png, atau .pdf.",
       }, { status: 415 });
+    }
+
+    if (file.type === "application/pdf") {
+      return NextResponse.json({
+        error: "OCR otomatis belum membaca PDF. Silakan isi data paspor manual.",
+        data: {
+          noPaspor: "",
+          tanggalLahir: "",
+          pasporExpired: "",
+          namaLengkap: "",
+          jenisKelamin: "",
+          source: "manual_pdf",
+        },
+      }, { status: 422 });
     }
 
     const buffer = Buffer.from(await file.arrayBuffer());
