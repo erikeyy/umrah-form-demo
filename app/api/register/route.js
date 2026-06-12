@@ -29,11 +29,53 @@ const cleanParticipantName = (value = "") => {
   return tokens.join(" ").trim();
 };
 
+const isPlainObject = (value) =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
 const normalizeParticipantData = (participant) => ({
   ...participant,
-  namaLengkap: cleanParticipantName(participant.namaLengkap),
-  noPaspor: participant.noPaspor?.toUpperCase().replace(/[^A-Z0-9]/g, "") || "",
+  namaLengkap: cleanParticipantName(participant?.namaLengkap),
+  noPaspor: participant?.noPaspor?.toUpperCase().replace(/[^A-Z0-9]/g, "") || "",
 });
+
+class BadRequestError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "BadRequestError";
+    this.status = 400;
+  }
+}
+
+const parseJsonFormField = (formData, fieldName, fallback = null) => {
+  const rawValue = formData.get(fieldName);
+  if (rawValue === null || rawValue === undefined || rawValue === "") return fallback;
+
+  try {
+    return JSON.parse(rawValue);
+  } catch {
+    throw new BadRequestError(`Payload ${fieldName} tidak valid.`);
+  }
+};
+
+const parsePrimaryParticipant = (formData) => {
+  const payload = parseJsonFormField(formData, "pendaftarUtama");
+  if (!isPlainObject(payload)) {
+    throw new BadRequestError("Data pendaftar utama tidak ditemukan atau tidak valid.");
+  }
+
+  return normalizeParticipantData(payload);
+};
+
+const parseFamilyParticipants = (formData) => {
+  const payload = parseJsonFormField(formData, "keluarga", []);
+  if (!Array.isArray(payload)) {
+    throw new BadRequestError("Data keluarga tidak valid.");
+  }
+
+  return payload
+    .filter(isPlainObject)
+    .map(normalizeParticipantData);
+};
 
 const getGoogleSheetsId = () => {
   const rawValue = process.env.GOOGLE_SHEETS_ID?.trim();
@@ -117,8 +159,8 @@ export async function POST(request) {
     const formData = await request.formData(); // [40]
     
     // Parsing String JSON dari Frontend
-    const pendaftarUtama = normalizeParticipantData(JSON.parse(formData.get("pendaftarUtama")));
-    const keluarga = JSON.parse(formData.get("keluarga") || "[]").map(normalizeParticipantData);
+    const pendaftarUtama = parsePrimaryParticipant(formData);
+    const keluarga = parseFamilyParticipants(formData);
     const projectPartner = formData.get("project_partner"); // [37]
     const utamaFiles = {
       ktp: formData.get("utama_ktp"),
@@ -247,6 +289,10 @@ export async function POST(request) {
       code: error?.code,
       response: error?.response?.data,
     });
+    if (error instanceof BadRequestError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+
     return NextResponse.json({ error: "Terjadi kesalahan internal pada server." }, { status: 500 });
   }
 }

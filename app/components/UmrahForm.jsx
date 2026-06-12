@@ -42,9 +42,9 @@ const cleanParticipantName = (value = "") => {
 };
 
 const normalizeParticipantData = (participant) => ({
-  ...participant,
-  namaLengkap: cleanParticipantName(participant.namaLengkap),
-  noPaspor: participant.noPaspor?.toUpperCase().replace(/[^A-Z0-9]/g, "") || "",
+  ...(participant || {}),
+  namaLengkap: cleanParticipantName(participant?.namaLengkap),
+  noPaspor: participant?.noPaspor?.toUpperCase().replace(/[^A-Z0-9]/g, "") || "",
 });
 
 // Fungsi Validasi Masa Berlaku Paspor
