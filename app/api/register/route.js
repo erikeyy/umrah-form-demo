@@ -115,6 +115,26 @@ const getGoogleDriveFolderId = () => {
   return rawValue.split(/[/?#]/)[0];
 };
 
+const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+const formatDateForSheet = (value) => {
+  if (!value) return "-";
+
+  const raw = String(value).trim();
+  const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) {
+    const month = MONTH_ABBR[Number(isoMatch[2]) - 1];
+    return month ? `${isoMatch[3]}-${month}-${isoMatch[1]}` : raw;
+  }
+
+  const displayMatch = raw.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/);
+  if (displayMatch) {
+    return `${displayMatch[1].padStart(2, "0")}-${displayMatch[2]}-${displayMatch[3]}`;
+  }
+
+  return raw;
+};
+
 const isUploadedFile = (file) =>
   file && typeof file.arrayBuffer === "function" && typeof file.name === "string" && file.size > 0;
 
@@ -173,7 +193,21 @@ const uploadFileToDrive = async (drive, file, { folderId, groupId, participantNa
   return response.data.webViewLink || `https://drive.google.com/file/d/${response.data.id}/view`;
 };
 
-// Autentikasi OAuth 2.0 (Service Account User Credentials)
+const createDriveFolder = async (drive, { parentFolderId, folderName }) => {
+  if (!parentFolderId) throw new Error("GOOGLE_DRIVE_FOLDER_ID belum dikonfigurasi.");
+
+  const response = await drive.files.create({
+    requestBody: {
+      name: folderName,
+      mimeType: "application/vnd.google-apps.folder",
+      parents: [parentFolderId],
+    },
+    fields: "id",
+  });
+
+  return response.data.id;
+};
+
 const oauth2Client = new google.auth.OAuth2(
   process.env.GOOGLE_CLIENT_ID,
   process.env.GOOGLE_CLIENT_SECRET
@@ -188,43 +222,73 @@ export async function POST(request) {
     const pendaftarUtama = parsePrimaryParticipant(formData);
     const keluarga = parseFamilyParticipants(formData);
     const projectPartner = formData.get("project_partner"); // [37]
+    const namaSfc = String(formData.get("nama_sfc") || "").trim() || "-";
+    const whatsappSfc = String(formData.get("whatsapp_sfc") || "").trim() || "-";
     const utamaFiles = {
       ktp: formData.get("utama_ktp"),
+      kk: formData.get("utama_kk"),
       paspor: formData.get("utama_paspor"),
       pasporHal4: formData.get("utama_paspor_hal4"),
       resiPaspor: formData.get("utama_resi_paspor"),
+      bpjs: formData.get("utama_bpjs"),
+      eicv: formData.get("utama_eicv"),
     };
+    if (!isUploadedFile(utamaFiles.kk)) {
+      throw new BadRequestError("Kartu Keluarga pendaftar utama wajib diupload.");
+    }
 
     // Generate ID Rombongan Unik
     const ID_PENDAFTARAN_GRUP = `RIDA-${crypto.randomBytes(4).toString("hex")}`;
-    const WAKTU_DAFTAR = new Date().toISOString(); // [37]
+    const WAKTU_DAFTAR = formatDateForSheet(new Date().toISOString()); // [37]
     const driveFolderId = getGoogleDriveFolderId();
     const drive = google.drive({ version: "v3", auth: oauth2Client });
+    const registrationFolderId = await createDriveFolder(drive, {
+      parentFolderId: driveFolderId,
+      folderName: ID_PENDAFTARAN_GRUP,
+    });
 
     const uploadParticipantFiles = async (files, participant, label) => ({
       ktp: await uploadFileToDrive(drive, files.ktp, {
-        folderId: driveFolderId,
+        folderId: registrationFolderId,
         groupId: ID_PENDAFTARAN_GRUP,
         participantName: participant.namaLengkap,
         documentType: `${label} KTP`,
       }),
+      kk: await uploadFileToDrive(drive, files.kk, {
+        folderId: registrationFolderId,
+        groupId: ID_PENDAFTARAN_GRUP,
+        participantName: participant.namaLengkap,
+        documentType: `${label} KARTU KELUARGA`,
+      }),
       paspor: await uploadFileToDrive(drive, files.paspor, {
-        folderId: driveFolderId,
+        folderId: registrationFolderId,
         groupId: ID_PENDAFTARAN_GRUP,
         participantName: participant.namaLengkap,
         documentType: `${label} PASPOR`,
       }),
       pasporHal4: await uploadFileToDrive(drive, files.pasporHal4, {
-        folderId: driveFolderId,
+        folderId: registrationFolderId,
         groupId: ID_PENDAFTARAN_GRUP,
         participantName: participant.namaLengkap,
         documentType: `${label} PASPOR HALAMAN 4`,
       }),
       resiPaspor: await uploadFileToDrive(drive, files.resiPaspor, {
-        folderId: driveFolderId,
+        folderId: registrationFolderId,
         groupId: ID_PENDAFTARAN_GRUP,
         participantName: participant.namaLengkap,
         documentType: `${label} RESI PASPOR`,
+      }),
+      bpjs: await uploadFileToDrive(drive, files.bpjs, {
+        folderId: registrationFolderId,
+        groupId: ID_PENDAFTARAN_GRUP,
+        participantName: participant.namaLengkap,
+        documentType: `${label} BPJS`,
+      }),
+      eicv: await uploadFileToDrive(drive, files.eicv, {
+        folderId: registrationFolderId,
+        groupId: ID_PENDAFTARAN_GRUP,
+        participantName: participant.namaLengkap,
+        documentType: `${label} E-ICV MENINGITIS`,
       }),
     });
 
@@ -242,27 +306,40 @@ export async function POST(request) {
       pendaftarUtama.email || "-",         // F
       pendaftarUtama.nik,                  // G
       pendaftarUtama.namaLengkap,          // H
-      pendaftarUtama.statusPaspor === 'READY' ? pendaftarUtama.noPaspor : "MENYUSUL", // I [18, 43]
-      pendaftarUtama.statusPaspor === 'READY' ? pendaftarUtama.pasporExpired : "-",   // J
-      pendaftarUtama.tanggalLahir || "-",  // K [44]
-      pendaftarUtama.jenisKelamin || "-",  // L
-      utamaFileLinks.ktp,                  // M
-      utamaFileLinks.paspor !== "-" ? utamaFileLinks.paspor : utamaFileLinks.resiPaspor, // N
-      utamaFileLinks.pasporHal4,           // O
-      pendaftarUtama.ukuranSeragam || "-", // P
-      deliveryLabel(pendaftarUtama.perlengkapanIbadah), // Q
-      pendaftarUtama.alamatPengiriman || "-",   // R
-      pendaftarUtama.kontakPengiriman || "-"    // S
+      pendaftarUtama.kotaAsal || "-",      // I
+      pendaftarUtama.statusPaspor === 'READY' ? pendaftarUtama.noPaspor : "MENYUSUL", // J [18, 43]
+      pendaftarUtama.statusPaspor === 'READY' ? formatDateForSheet(pendaftarUtama.pasporIssued) : "-",   // K
+      pendaftarUtama.statusPaspor === 'READY' ? formatDateForSheet(pendaftarUtama.pasporExpired) : "-",   // L
+      formatDateForSheet(pendaftarUtama.tanggalLahir),  // M [44]
+      pendaftarUtama.jenisKelamin || "-",  // N
+      utamaFileLinks.ktp,                  // O
+      utamaFileLinks.paspor !== "-" ? utamaFileLinks.paspor : utamaFileLinks.resiPaspor, // P
+      utamaFileLinks.pasporHal4,           // Q
+      pendaftarUtama.ukuranSeragam || "-", // R
+      deliveryLabel(pendaftarUtama.perlengkapanIbadah), // S
+      pendaftarUtama.alamatPengiriman || "-",   // T
+      pendaftarUtama.kontakPengiriman || "-",   // U
+      namaSfc,                             // V
+      whatsappSfc,                         // W
+      utamaFileLinks.kk,                   // X
+      utamaFileLinks.bpjs,                 // Y
+      utamaFileLinks.eicv                  // Z
     ]); // [36, 37, 45]
 
     // Baris 2 - 5: Anggota Keluarga (Di-loop secara dinamis)
     for (const [index, anggota] of keluarga.entries()) {
       const anggotaFiles = {
         ktp: formData.get(`keluarga_${index}_ktp`),
+        kk: formData.get(`keluarga_${index}_kk`),
         paspor: formData.get(`keluarga_${index}_paspor`),
         pasporHal4: formData.get(`keluarga_${index}_paspor_hal4`),
         resiPaspor: formData.get(`keluarga_${index}_resi_paspor`),
+        bpjs: formData.get(`keluarga_${index}_bpjs`),
+        eicv: formData.get(`keluarga_${index}_eicv`),
       };
+      if (!isUploadedFile(anggotaFiles.kk)) {
+        throw new BadRequestError(`Kartu Keluarga anggota ${index + 1} wajib diupload.`);
+      }
       const anggotaFileLinks = await uploadParticipantFiles(
         anggotaFiles,
         anggota,
@@ -278,9 +355,11 @@ export async function POST(request) {
         "-",
         anggota.nik,
         anggota.namaLengkap,
+        anggota.kotaAsal || "-",
         anggota.statusPaspor === 'READY' ? anggota.noPaspor : "MENYUSUL", // [31, 35]
-        anggota.statusPaspor === 'READY' ? anggota.pasporExpired : "-",
-        anggota.tanggalLahir || "-",
+        anggota.statusPaspor === 'READY' ? formatDateForSheet(anggota.pasporIssued) : "-",
+        anggota.statusPaspor === 'READY' ? formatDateForSheet(anggota.pasporExpired) : "-",
+        formatDateForSheet(anggota.tanggalLahir),
         anggota.jenisKelamin || "-",
         anggotaFileLinks.ktp,
         anggotaFileLinks.paspor !== "-" ? anggotaFileLinks.paspor : anggotaFileLinks.resiPaspor,
@@ -288,7 +367,12 @@ export async function POST(request) {
         anggota.ukuranSeragam || "-",
         deliveryLabel(anggota.perlengkapanIbadah),
         anggota.alamatPengiriman || "-",
-        anggota.kontakPengiriman || "-"
+        anggota.kontakPengiriman || "-",
+        namaSfc,
+        whatsappSfc,
+        anggotaFileLinks.kk,
+        anggotaFileLinks.bpjs,
+        anggotaFileLinks.eicv
       ]);
     } // [37]
 
@@ -301,7 +385,7 @@ export async function POST(request) {
     const sheets = google.sheets({ version: "v4", auth: oauth2Client });
     await sheets.spreadsheets.values.append({
       spreadsheetId,
-      range: "Sheet1!A:S", // [46]
+      range: "Sheet1!A:Z", // [46]
       valueInputOption: "USER_ENTERED",
       requestBody: { values: sheetValues },
     });

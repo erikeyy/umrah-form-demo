@@ -1,45 +1,89 @@
 import { NextResponse } from "next/server";
-import path from "node:path";
-import { createWorker } from "tesseract.js";
+import { OAuth2Client } from "google-auth-library";
 
 export const runtime = "nodejs";
 
 const MAX_FILE_SIZE = 15 * 1024 * 1024;
-const OCR_MIME_TYPES = new Set(["image/jpeg", "image/jpg", "image/png"]);
-const ACCEPTED_MIME_TYPES = new Set([...OCR_MIME_TYPES, "application/pdf"]);
-const TESSERACT_LANG_PATH = path.join(
-  process.cwd(),
-  "node_modules",
-  "@tesseract.js-data",
-  "eng",
-  "4.0.0"
-);
-const TESSERACT_WORKER_PATH = path.join(
-  process.cwd(),
-  "node_modules",
-  "tesseract.js",
-  "src",
-  "worker-script",
-  "node",
-  "index.js"
-);
-const TESSERACT_CORE_PATH = path.join(
-  process.cwd(),
-  "node_modules",
-  "tesseract.js-core"
-);
+const ACCEPTED_MIME_TYPES = new Set(["image/jpeg", "image/jpg", "image/png", "application/pdf"]);
+const DOCUMENT_AI_SCOPE = "https://www.googleapis.com/auth/cloud-platform";
+const PASSPORT_OUTPUT_EMPTY = {
+  passportNumber: "",
+  fullName: "",
+  nationality: "",
+  dateOfBirth: "",
+  placeOfBirth: "",
+  gender: "",
+  issueDate: "",
+  expiryDate: "",
+  mrz: "",
+};
+
+const getEnv = (...keys) => {
+  for (const key of keys) {
+    const value = process.env[key]?.trim();
+    if (value) return value;
+  }
+
+  return "";
+};
+
+const getDocumentAiConfig = () => ({
+  projectId: getEnv("DOCUMENT_AI_PROJECT_ID", "GOOGLE_CLOUD_PROJECT_ID", "GOOGLE_PROJECT_ID"),
+  location: getEnv("DOCUMENT_AI_LOCATION", "GOOGLE_DOCUMENT_AI_LOCATION") || "us",
+  processorId: getEnv("DOCUMENT_AI_PROCESSOR_ID", "GOOGLE_DOCUMENT_AI_PROCESSOR_ID"),
+});
+
+const assertDocumentAiConfig = () => {
+  const config = getDocumentAiConfig();
+  const missing = [];
+
+  if (!process.env.GOOGLE_CLIENT_ID?.trim()) missing.push("GOOGLE_CLIENT_ID");
+  if (!process.env.GOOGLE_CLIENT_SECRET?.trim()) missing.push("GOOGLE_CLIENT_SECRET");
+  if (!process.env.GOOGLE_REFRESH_TOKEN?.trim()) missing.push("GOOGLE_REFRESH_TOKEN");
+  if (!config.projectId) missing.push("DOCUMENT_AI_PROJECT_ID");
+  if (!config.processorId) missing.push("DOCUMENT_AI_PROCESSOR_ID");
+
+  if (missing.length > 0) {
+    throw new Error(`Konfigurasi Google Cloud belum lengkap: ${missing.join(", ")}.`);
+  }
+
+  return config;
+};
+
+const createOAuthClient = () => {
+  const client = new OAuth2Client(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET
+  );
+
+  client.setCredentials({
+    refresh_token: process.env.GOOGLE_REFRESH_TOKEN,
+    scope: DOCUMENT_AI_SCOPE,
+  });
+
+  return client;
+};
 
 const cleanPassportNumber = (value = "") =>
-  value.toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/O/g, "0");
+  value.toUpperCase().replace(/[^A-Z0-9]/g, "").replace(/O/g, "0").slice(0, 9);
 
-const normalizeOcrText = (text = "") =>
-  text
+const cleanTextValue = (value = "") =>
+  String(value)
     .replace(/\r/g, "\n")
     .replace(/[|]/g, "I")
     .replace(/[«‹]/g, "<")
     .replace(/[»›]/g, ">")
     .replace(/[ \t]+/g, " ")
     .trim();
+
+const cleanName = (value = "") =>
+  String(value)
+    .toUpperCase()
+    .replace(/[^A-Z\s']/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 const normalizeDate = (value) => {
   if (!value) return "";
@@ -92,7 +136,23 @@ const normalizeDate = (value) => {
     return `${namedMonth[3]}-${monthNames[namedMonth[2]]}-${namedMonth[1].padStart(2, "0")}`;
   }
 
+  const namedMonthDashed = raw.toLowerCase().match(/\b(\d{1,2})-([a-z]+)-(\d{4})\b/);
+  if (namedMonthDashed && monthNames[namedMonthDashed[2]]) {
+    return `${namedMonthDashed[3]}-${monthNames[namedMonthDashed[2]]}-${namedMonthDashed[1].padStart(2, "0")}`;
+  }
+
   return "";
+};
+
+const formatDateForOutput = (value) => {
+  const isoDate = normalizeDate(value);
+  const match = isoDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return "";
+
+  const month = MONTH_ABBR[Number(match[2]) - 1];
+  if (!month) return "";
+
+  return `${match[3]}-${month}-${match[1]}`;
 };
 
 const mrzDateToIso = (value, mode) => {
@@ -125,30 +185,6 @@ const normalizeMrzLine = (line = "") =>
     .replace(/[>)}\]]/g, "<")
     .replace(/[^A-Z0-9<]/g, "");
 
-const MRZ_FILLER_NOISE = /^[CLKI]+$/;
-const COMMON_LEADING_NOISE_FIXES = new Map([
-  ["SERIK", "ERIK"],
-  ["NYULIANTO", "YULIANTO"],
-]);
-
-const cleanMrzNameToken = (token = "") => {
-  const normalized = token.toUpperCase().replace(/[^A-Z]/g, "");
-  if (normalized.length < 2 || MRZ_FILLER_NOISE.test(normalized)) return "";
-  if (COMMON_LEADING_NOISE_FIXES.has(normalized)) return COMMON_LEADING_NOISE_FIXES.get(normalized);
-
-  return normalized;
-};
-
-const cleanMrzName = (...nameParts) => {
-  const tokens = nameParts
-    .join(" ")
-    .split(/\s+/)
-    .map(cleanMrzNameToken)
-    .filter(Boolean);
-
-  return tokens.join(" ").trim();
-};
-
 const parseMrz = (text = "") => {
   const lines = text
     .split(/\n/)
@@ -161,18 +197,16 @@ const parseMrz = (text = "") => {
 
     if (!line1.startsWith("P<") || line2.length < 27) continue;
 
-    const nameParts = line1.slice(5).split("<<");
-    const surname = nameParts[0]?.replace(/</g, " ").trim();
-    const givenNames = nameParts[1]?.replace(/</g, " ").trim();
-    const namaLengkap = cleanMrzName(givenNames, surname);
+    const [surname = "", givenNames = ""] = line1.slice(5).split("<<");
 
     return {
-      noPaspor: cleanPassportNumber(line2.slice(0, 9).replace(/</g, "")),
-      tanggalLahir: mrzDateToIso(line2.slice(13, 19).replace(/[A-Z]/g, "0"), "birth"),
-      pasporExpired: mrzDateToIso(line2.slice(21, 27).replace(/[A-Z]/g, "0"), "expiry"),
-      jenisKelamin: line2[20] === "F" ? "P" : line2[20] === "M" ? "L" : "",
-      namaLengkap,
-      source: "mrz",
+      passportNumber: cleanPassportNumber(line2.slice(0, 9).replace(/</g, "")),
+      fullName: cleanName(`${givenNames.replace(/</g, " ")} ${surname.replace(/</g, " ")}`),
+      nationality: line2.slice(10, 13).replace(/</g, ""),
+      dateOfBirth: mrzDateToIso(line2.slice(13, 19).replace(/[A-Z]/g, "0"), "birth"),
+      gender: line2[20] === "F" ? "P" : line2[20] === "M" ? "L" : "",
+      expiryDate: mrzDateToIso(line2.slice(21, 27).replace(/[A-Z]/g, "0"), "expiry"),
+      mrz: `${line1}\n${line2}`,
     };
   }
 
@@ -222,54 +256,163 @@ const parsePlainTextFields = (text = "") => {
     text.match(/\b[A-Z][0-9O]{7,8}\b/i)?.[0] ||
     "";
   const genderRaw = valueAfterLabel(lines, "(?:sex|gender|jenis\\s*kelamin)");
-  const nameRaw =
-    valueAfterLabel(lines, "(?:full\\s*name|name|nama\\s*lengkap|nama)") ||
-    "";
 
   return {
-    noPaspor: passportRaw ? cleanPassportNumber(passportRaw).slice(0, 9) : "",
-    tanggalLahir: findFirstDateNearLabel(lines, "(?:date\\s*of\\s*birth|birth\\s*date|tanggal\\s*lahir|tgl\\.?\\s*lahir)"),
-    pasporExpired: findFirstDateNearLabel(lines, "(?:expiry|expiration|date\\s*of\\s*expiry|berlaku\\s*sampai|tanggal\\s*berakhir)"),
-    namaLengkap: nameRaw
-      .replace(/[^A-Za-z\s']/g, " ")
-      .replace(/\s+/g, " ")
-      .trim()
-      .toUpperCase(),
-    jenisKelamin: /^(m|male|l|laki)/i.test(genderRaw)
+    passportNumber: passportRaw ? cleanPassportNumber(passportRaw) : "",
+    fullName: cleanName(valueAfterLabel(lines, "(?:full\\s*name|name|nama\\s*lengkap|nama)")),
+    nationality: valueAfterLabel(lines, "(?:nationality|kewarganegaraan|warga\\s*negara)").toUpperCase(),
+    dateOfBirth: findFirstDateNearLabel(lines, "(?:date\\s*of\\s*birth|birth\\s*date|tanggal\\s*lahir|tgl\\.?\\s*lahir)"),
+    placeOfBirth: valueAfterLabel(lines, "(?:place\\s*of\\s*birth|tempat\\s*lahir)").toUpperCase(),
+    gender: /^(m|male|l|laki)/i.test(genderRaw)
       ? "L"
       : /^(f|female|p|perempuan)/i.test(genderRaw)
         ? "P"
         : "",
-    source: "plain_text",
+    issueDate: findFirstDateNearLabel(lines, "(?:date\\s*of\\s*issue|issue\\s*date|tanggal\\s*dikeluarkan|tanggal\\s*terbit)"),
+    expiryDate: findFirstDateNearLabel(lines, "(?:expiry|expiration|date\\s*of\\s*expiry|berlaku\\s*sampai|tanggal\\s*berakhir)"),
   };
 };
 
-const mergeOcrResults = (textResult, mrzResult) => ({
-  noPaspor: mrzResult.noPaspor || textResult.noPaspor || "",
-  tanggalLahir: mrzResult.tanggalLahir || textResult.tanggalLahir || "",
-  pasporExpired: mrzResult.pasporExpired || textResult.pasporExpired || "",
-  namaLengkap: mrzResult.namaLengkap || textResult.namaLengkap || "",
-  jenisKelamin: mrzResult.jenisKelamin || textResult.jenisKelamin || "",
-  source: mrzResult.noPaspor ? "mrz" : textResult.source || "none",
+const getNormalizedDateValue = (entity) => {
+  const dateValue = entity?.normalizedValue?.dateValue;
+  if (!dateValue?.year || !dateValue?.month || !dateValue?.day) return "";
+
+  return `${dateValue.year}-${String(dateValue.month).padStart(2, "0")}-${String(dateValue.day).padStart(2, "0")}`;
+};
+
+const getEntityText = (entity) =>
+  cleanTextValue(
+    getNormalizedDateValue(entity) ||
+      entity?.mentionText ||
+      entity?.normalizedValue?.text ||
+      entity?.textAnchor?.content ||
+      ""
+  );
+
+const normalizeEntityType = (type = "") =>
+  String(type).toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+
+const ENTITY_FIELD_MAP = new Map([
+  ["passport_number", "passportNumber"],
+  ["passport_no", "passportNumber"],
+  ["document_number", "passportNumber"],
+  ["id_number", "passportNumber"],
+  ["name", "fullName"],
+  ["full_name", "fullName"],
+  ["given_names", "fullName"],
+  ["surname", "fullName"],
+  ["nationality", "nationality"],
+  ["country_code", "nationality"],
+  ["date_of_birth", "dateOfBirth"],
+  ["birth_date", "dateOfBirth"],
+  ["place_of_birth", "placeOfBirth"],
+  ["birth_place", "placeOfBirth"],
+  ["sex", "gender"],
+  ["gender", "gender"],
+  ["date_of_issue", "issueDate"],
+  ["issue_date", "issueDate"],
+  ["date_of_expiry", "expiryDate"],
+  ["expiration_date", "expiryDate"],
+  ["expiry_date", "expiryDate"],
+  ["mrz", "mrz"],
+]);
+
+const normalizeGender = (value = "") => {
+  if (/^(m|male|l|laki)/i.test(value)) return "L";
+  if (/^(f|female|p|perempuan)/i.test(value)) return "P";
+  return "";
+};
+
+const normalizeFieldValue = (field, value) => {
+  if (!value) return "";
+  if (field === "passportNumber") return cleanPassportNumber(value);
+  if (field === "fullName") return cleanName(value);
+  if (field === "nationality" || field === "placeOfBirth") return value.toUpperCase();
+  if (field === "gender") return normalizeGender(value);
+  if (field.endsWith("Date") || field === "dateOfBirth") return normalizeDate(value);
+  if (field === "mrz") return value.toUpperCase();
+  return value;
+};
+
+const parseDocumentEntities = (entities = []) => {
+  const result = { ...PASSPORT_OUTPUT_EMPTY };
+  const nameParts = [];
+
+  for (const entity of entities) {
+    const type = normalizeEntityType(entity.type);
+    const field = ENTITY_FIELD_MAP.get(type);
+    if (entity.properties?.length) {
+      const nestedResult = parseDocumentEntities(entity.properties);
+      for (const key of Object.keys(PASSPORT_OUTPUT_EMPTY)) {
+        if (!result[key] && nestedResult[key]) result[key] = nestedResult[key];
+      }
+    }
+
+    if (!field) continue;
+
+    const value = normalizeFieldValue(field, getEntityText(entity));
+    if (!value) continue;
+
+    if ((type === "given_names" || type === "surname") && field === "fullName") {
+      nameParts.push(value);
+      continue;
+    }
+
+    if (!result[field]) result[field] = value;
+  }
+
+  if (!result.fullName && nameParts.length > 0) {
+    result.fullName = cleanName(nameParts.join(" "));
+  }
+
+  return result;
+};
+
+const mergePassportData = (...results) =>
+  results.reduce((merged, result) => {
+    for (const key of Object.keys(PASSPORT_OUTPUT_EMPTY)) {
+      if (!merged[key] && result?.[key]) merged[key] = result[key];
+    }
+
+    return merged;
+  }, { ...PASSPORT_OUTPUT_EMPTY });
+
+const formatPassportDates = (data) => ({
+  ...data,
+  dateOfBirth: formatDateForOutput(data.dateOfBirth),
+  issueDate: formatDateForOutput(data.issueDate),
+  expiryDate: formatDateForOutput(data.expiryDate),
 });
 
-const runLocalOcr = async (buffer) => {
-  const worker = await createWorker("eng", 1, {
-    cacheMethod: "none",
-    corePath: TESSERACT_CORE_PATH,
-    langPath: TESSERACT_LANG_PATH,
-    workerPath: TESSERACT_WORKER_PATH,
+const runDocumentAi = async (buffer, mimeType) => {
+  const { projectId, location, processorId } = assertDocumentAiConfig();
+  const authClient = createOAuthClient();
+  const { token } = await authClient.getAccessToken();
+
+  if (!token) throw new Error("Gagal mendapatkan Google access token dari refresh token.");
+
+  const url = `https://${location}-documentai.googleapis.com/v1/projects/${projectId}/locations/${location}/processors/${processorId}:process`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      rawDocument: {
+        content: buffer.toString("base64"),
+        mimeType: mimeType || "image/jpeg",
+      },
+    }),
   });
 
-  try {
-    const {
-      data: { text },
-    } = await worker.recognize(buffer);
-
-    return normalizeOcrText(text);
-  } finally {
-    await worker.terminate();
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = payload?.error?.message || "Google Document AI gagal memproses file paspor.";
+    throw new Error(message);
   }
+
+  return payload.document || {};
 };
 
 export async function POST(request) {
@@ -291,27 +434,15 @@ export async function POST(request) {
       }, { status: 415 });
     }
 
-    if (file.type === "application/pdf") {
-      return NextResponse.json({
-        error: "OCR otomatis belum membaca PDF. Silakan isi data paspor manual.",
-        data: {
-          noPaspor: "",
-          tanggalLahir: "",
-          pasporExpired: "",
-          namaLengkap: "",
-          jenisKelamin: "",
-          source: "manual_pdf",
-        },
-      }, { status: 422 });
-    }
-
     const buffer = Buffer.from(await file.arrayBuffer());
-    const text = await runLocalOcr(buffer);
+    const document = await runDocumentAi(buffer, file.type);
+    const text = cleanTextValue(document.text || "");
+    const entityResult = parseDocumentEntities(document.entities || []);
     const textResult = parsePlainTextFields(text);
     const mrzResult = parseMrz(text);
-    const data = mergeOcrResults(textResult, mrzResult);
+    const data = formatPassportDates(mergePassportData(mrzResult, entityResult, textResult));
 
-    if (!data.noPaspor && !data.tanggalLahir && !data.pasporExpired) {
+    if (!data.passportNumber && !data.fullName && !data.dateOfBirth && !data.expiryDate) {
       return NextResponse.json({
         error: "Data paspor belum terbaca. Silakan isi manual atau upload foto paspor yang lebih jelas.",
         data,
@@ -320,9 +451,10 @@ export async function POST(request) {
 
     return NextResponse.json({ success: true, data });
   } catch (error) {
-    console.error("Local Passport OCR Error:", error);
+    console.error("Google Passport OCR Error:", error);
     return NextResponse.json({
-      error: "Gagal membaca data paspor melalui OCR lokal. Silakan isi manual.",
+      error: error.message || "Gagal membaca data paspor melalui Google Cloud. Silakan isi manual.",
+      data: { ...PASSPORT_OUTPUT_EMPTY },
     }, { status: 500 });
   }
 }

@@ -6,7 +6,7 @@ import { UploadCloud, CheckCircle2, AlertCircle, Plus, Trash2, ChevronRight, Che
 
 const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15MB
 const ACCEPTED_FILE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'];
-const OCR_FILE_TYPES = ['image/jpeg', 'image/jpg', 'image/png'];
+const OCR_FILE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'];
 const TOTAL_STEPS = 4;
 const MAX_FAMILY_MEMBERS = 4;
 const SERAGAM_OPTIONS = [
@@ -47,6 +47,57 @@ const normalizeParticipantData = (participant) => ({
   ...(participant || {}),
   namaLengkap: cleanParticipantName(participant?.namaLengkap),
   noPaspor: participant?.noPaspor?.toUpperCase().replace(/[^A-Z0-9]/g, "") || "",
+  kotaAsal: participant?.kotaAsal?.trim() || "",
+});
+
+const MONTH_INDEX = {
+  jan: '01',
+  feb: '02',
+  mar: '03',
+  apr: '04',
+  may: '05',
+  jun: '06',
+  jul: '07',
+  aug: '08',
+  sep: '09',
+  oct: '10',
+  nov: '11',
+  dec: '12',
+};
+
+const toHtmlDateValue = (value = "") => {
+  const raw = String(value).trim();
+  const iso = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return raw;
+
+  const displayDate = raw.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{4})$/);
+  if (!displayDate) return "";
+
+  const month = MONTH_INDEX[displayDate[2].toLowerCase()];
+  if (!month) return "";
+
+  return `${displayDate[3]}-${month}-${displayDate[1].padStart(2, "0")}`;
+};
+
+const formatDateForDisplay = (value = "") => {
+  const htmlDate = toHtmlDateValue(value);
+  const match = htmlDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return value || "-";
+
+  const month = Object.entries(MONTH_INDEX).find(([, number]) => number === match[2])?.[0];
+  if (!month) return value || "-";
+
+  return `${match[3]}-${month.charAt(0).toUpperCase()}${month.slice(1)}-${match[1]}`;
+};
+
+const normalizePassportReaderData = (data = {}) => ({
+  namaLengkap: data.fullName || data.namaLengkap || "",
+  noPaspor: data.passportNumber || data.noPaspor || "",
+  pasporIssued: toHtmlDateValue(data.issueDate || data.pasporIssued),
+  pasporExpired: toHtmlDateValue(data.expiryDate || data.pasporExpired),
+  tanggalLahir: toHtmlDateValue(data.dateOfBirth || data.tanggalLahir),
+  jenisKelamin: data.gender || data.jenisKelamin || "",
+  tempatLahir: data.placeOfBirth || data.tempatLahir || "",
 });
 
 const isParticipantObject = (value) =>
@@ -89,24 +140,30 @@ const isValidPassport = (dateString) => {
 export default function UmrahForm() {
   const searchParams = useSearchParams();
   const projectName = searchParams.get('project-name') || 'Reguler';
+  const isTiraProject = projectName?.toLowerCase() === 'tira';
 
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [isSuccess, setIsSuccess] = useState(false);
+  const [sfcInfo, setSfcInfo] = useState({
+    namaSfc: '',
+    whatsappSfc: '',
+  });
 
   // State Jemaah Utama (Sesuai Form Baru)
   const [primary, setPrimary] = useState({
     namaLengkap: '', nik: '', whatsapp: '', email: '',
-    noPaspor: '', pasporExpired: '', tanggalLahir: '',
+    noPaspor: '', pasporIssued: '', pasporExpired: '', tanggalLahir: '',
     jenisKelamin: '', tempatLahir: '', statusPaspor: 'READY',
+    kotaAsal: '',
     ukuranSeragam: '', perlengkapanIbadah: '',
     alamatPengiriman: '', kontakPengiriman: ''
   });
 
   const [family, setFamily] = useState([]);
   const [documents, setDocuments] = useState({
-    primary: { ktp: null, paspor: null, pasporHal4: null },
+    primary: { ktp: null, kk: null, paspor: null, pasporHal4: null, bpjs: null, eicv: null },
     family: {}
   });
   const [hasPasporHal4, setHasPasporHal4] = useState(false);
@@ -119,6 +176,12 @@ export default function UmrahForm() {
   const handlePrimaryChange = (e) => {
     const { name, value } = e.target;
     setPrimary(prev => ({ ...prev, [name]: value }));
+    if (errors[name]) setErrors(prev => ({ ...prev, [name]: null }));
+  };
+
+  const handleSfcChange = (e) => {
+    const { name, value } = e.target;
+    setSfcInfo(prev => ({ ...prev, [name]: value }));
     if (errors[name]) setErrors(prev => ({ ...prev, [name]: null }));
   };
 
@@ -135,8 +198,9 @@ export default function UmrahForm() {
 
       return [...prev, {
         id: `${Date.now()}-${prev.length}`, namaLengkap: '', nik: '', hubungan: '',
-        noPaspor: '', pasporExpired: '', tanggalLahir: '',
+        noPaspor: '', pasporIssued: '', pasporExpired: '', tanggalLahir: '',
         jenisKelamin: '', tempatLahir: '', statusPaspor: 'READY',
+        kotaAsal: '',
         hasPasporHal4: false,
         ukuranSeragam: '', perlengkapanIbadah: '',
         alamatPengiriman: '', kontakPengiriman: ''
@@ -191,7 +255,7 @@ export default function UmrahForm() {
 
     try {
       if (!OCR_FILE_TYPES.includes(file.type)) {
-        throw new Error('OCR otomatis hanya mendukung JPG/JPEG/PNG. Untuk PDF, silakan isi data paspor manual.');
+        throw new Error('OCR otomatis hanya mendukung JPG/JPEG/PNG/PDF. Silakan isi data paspor manual.');
       }
 
       const formData = new window.FormData();
@@ -205,24 +269,28 @@ export default function UmrahForm() {
       const result = await readApiResponse(response, 'Data paspor belum terbaca. Silakan isi manual.');
       if (!response.ok) throw new Error(result.error || 'Data paspor belum terbaca.');
 
-      const ocrData = result.data || {};
+      const ocrData = normalizePassportReaderData(result.data || {});
 
       if (owner === 'family') {
         setFamily(prev => prev.map(member => member.id === memberId ? {
           ...member,
           namaLengkap: cleanParticipantName(ocrData.namaLengkap) || member.namaLengkap,
           noPaspor: ocrData.noPaspor || member.noPaspor,
+          pasporIssued: ocrData.pasporIssued || member.pasporIssued,
           pasporExpired: ocrData.pasporExpired || member.pasporExpired,
           tanggalLahir: ocrData.tanggalLahir || member.tanggalLahir,
           jenisKelamin: ocrData.jenisKelamin || member.jenisKelamin,
+          tempatLahir: ocrData.tempatLahir || member.tempatLahir,
         } : member));
         setErrors(prev => ({
           ...prev,
           [`fam_${index}_paspor`]: null,
           [`fam_${index}_noPaspor`]: null,
+          [`fam_${index}_pasporIssued`]: null,
           [`fam_${index}_pasporExpired`]: null,
           [`fam_${index}_tanggalLahir`]: null,
           [`fam_${index}_jenisKelamin`]: null,
+          [`fam_${index}_tempatLahir`]: null,
           [`fam_${index}_ocr`]: null,
         }));
       } else {
@@ -230,12 +298,14 @@ export default function UmrahForm() {
           ...prev,
           namaLengkap: cleanParticipantName(ocrData.namaLengkap) || prev.namaLengkap,
           noPaspor: ocrData.noPaspor || prev.noPaspor,
+          pasporIssued: ocrData.pasporIssued || prev.pasporIssued,
           pasporExpired: ocrData.pasporExpired || prev.pasporExpired,
           tanggalLahir: ocrData.tanggalLahir || prev.tanggalLahir,
           jenisKelamin: ocrData.jenisKelamin || prev.jenisKelamin,
+          tempatLahir: ocrData.tempatLahir || prev.tempatLahir,
         }));
         setOcrSuccess(true);
-        setErrors(prev => ({ ...prev, ocr: null, pasporExpired: null, noPaspor: null, namaLengkap: null, tanggalLahir: null, jenisKelamin: null }));
+        setErrors(prev => ({ ...prev, ocr: null, pasporIssued: null, pasporExpired: null, noPaspor: null, namaLengkap: null, tanggalLahir: null, jenisKelamin: null, tempatLahir: null }));
       }
     } catch (err) {
       if (owner === 'family') {
@@ -249,7 +319,17 @@ export default function UmrahForm() {
     }
   };
 
-  const getFamilyDocuments = (id) => documents.family[id] || { ktp: null, paspor: null, pasporHal4: null };
+  const getParticipantDocuments = (current = {}) => ({
+    ktp: null,
+    kk: null,
+    paspor: null,
+    pasporHal4: null,
+    bpjs: null,
+    eicv: null,
+    ...current,
+  });
+
+  const getFamilyDocuments = (id) => getParticipantDocuments(documents.family[id]);
 
   const handleFileChange = (e, type, options = {}) => {
     const { owner = 'primary', memberId = null, errorKey = type } = options;
@@ -265,7 +345,7 @@ export default function UmrahForm() {
     }
     setDocuments(prev => {
       if (owner === 'family') {
-        const currentMemberDocuments = prev.family[memberId] || { ktp: null, paspor: null, pasporHal4: null };
+        const currentMemberDocuments = getParticipantDocuments(prev.family[memberId]);
         return {
           ...prev,
           family: {
@@ -275,7 +355,7 @@ export default function UmrahForm() {
         };
       }
 
-      return { ...prev, primary: { ...prev.primary, [type]: file } };
+      return { ...prev, primary: { ...getParticipantDocuments(prev.primary), [type]: file } };
     });
     setErrors(prev => ({ ...prev, [errorKey]: null }));
     if (type === 'paspor') scanPassportOCR(file, { owner, memberId, index: options.index });
@@ -283,8 +363,11 @@ export default function UmrahForm() {
 
   const validateStep1 = () => {
     const newErrors = {};
+    if (isTiraProject && !sfcInfo.namaSfc.trim()) newErrors.namaSfc = "Nama SFC wajib diisi";
+    if (isTiraProject && !/^(\+62|62|0)8[1-9][0-9]{6,10}$/.test(sfcInfo.whatsappSfc)) newErrors.whatsappSfc = "Format WA SFC tidak valid (Contoh: 0812...)";
     if (!/^\d{16}$/.test(primary.nik)) newErrors.nik = "NIK wajib 16 digit angka";
     if (!/^(\+62|62|0)8[1-9][0-9]{6,10}$/.test(primary.whatsapp)) newErrors.whatsapp = "Format WA tidak valid (Contoh: 0812...)";
+    if (!primary.kotaAsal.trim()) newErrors.kotaAsal = "Kota asal wajib diisi";
     if (family.length > MAX_FAMILY_MEMBERS) newErrors.familyLimit = `Anggota keluarga maksimal ${MAX_FAMILY_MEMBERS} orang`;
 
     family.forEach((member, index) => {
@@ -296,6 +379,7 @@ export default function UmrahForm() {
       if (!member.hubungan) newErrors[`fam_${index}_hub`] = "Hubungan wajib diisi";
       if (!/^\d{16}$/.test(member.nik || "")) newErrors[`fam_${index}_nik`] = "NIK wajib 16 digit angka";
       if ((member.namaLengkap || "").length < 3) newErrors[`fam_${index}_namaLengkap`] = "Nama wajib diisi";
+      if (!member.kotaAsal?.trim()) newErrors[`fam_${index}_kotaAsal`] = "Kota asal wajib diisi";
     });
     
     setErrors(newErrors);
@@ -309,6 +393,7 @@ export default function UmrahForm() {
   const validateStep3 = () => {
     const newErrors = {};
     if (!documents.primary.ktp) newErrors.ktp = "KTP wajib diupload";
+    if (!documents.primary.kk) newErrors.kk = "Kartu Keluarga wajib diupload";
     if (family.length > MAX_FAMILY_MEMBERS) newErrors.familyLimit = `Anggota keluarga maksimal ${MAX_FAMILY_MEMBERS} orang`;
     
     if (primary.statusPaspor === 'READY') {
@@ -331,6 +416,7 @@ export default function UmrahForm() {
 
       const memberDocuments = getFamilyDocuments(member.id);
       if (!memberDocuments.ktp) newErrors[`fam_${index}_ktp`] = "KTP anggota wajib diupload";
+      if (!memberDocuments.kk) newErrors[`fam_${index}_kk`] = "Kartu Keluarga wajib diupload";
 
       if (member.statusPaspor === 'READY') {
         if (!memberDocuments.paspor) newErrors[`fam_${index}_paspor`] = "Paspor anggota wajib diupload";
@@ -359,6 +445,7 @@ export default function UmrahForm() {
       }
 
       if (!participant.ukuranSeragam) newErrors[`${prefix}_ukuranSeragam`] = "Ukuran seragam wajib dipilih";
+      if (!participant.kotaAsal?.trim()) newErrors[`${prefix}_kotaAsal`] = "Kota asal wajib diisi";
       if (!participant.perlengkapanIbadah) newErrors[`${prefix}_perlengkapanIbadah`] = "Pilihan perlengkapan ibadah wajib dipilih";
       if (participant.perlengkapanIbadah === 'DIKIRIM') {
         if (!participant.alamatPengiriman?.trim()) newErrors[`${prefix}_alamatPengiriman`] = "Alamat lengkap wajib diisi";
@@ -397,8 +484,10 @@ export default function UmrahForm() {
     try {
       const formData = new window.FormData(); 
       
-      const projectPartner = projectName?.toLowerCase() === 'tira' ? 'Tira Satria Niaga' : 'Reguler';
+      const projectPartner = isTiraProject ? 'Tira Satria Niaga' : 'Reguler';
       formData.append("project_partner", projectPartner);
+      formData.append("nama_sfc", sfcInfo.namaSfc.trim());
+      formData.append("whatsapp_sfc", sfcInfo.whatsappSfc.trim());
       const finalPrimary = normalizeParticipantData(primary);
       const finalFamily = family
         .filter(isParticipantObject)
@@ -419,16 +508,22 @@ export default function UmrahForm() {
       formData.append("keluarga", JSON.stringify(finalFamily));
 
       if (documents.primary.ktp) formData.append("utama_ktp", documents.primary.ktp);
+      if (documents.primary.kk) formData.append("utama_kk", documents.primary.kk);
       if (documents.primary.paspor) formData.append("utama_paspor", documents.primary.paspor);
       if (hasPasporHal4 && documents.primary.pasporHal4) formData.append("utama_paspor_hal4", documents.primary.pasporHal4);
       if (finalPrimary.statusPaspor === 'PENDING' && documents.primary.pasporHal4) formData.append("utama_resi_paspor", documents.primary.pasporHal4);
+      if (documents.primary.bpjs) formData.append("utama_bpjs", documents.primary.bpjs);
+      if (documents.primary.eicv) formData.append("utama_eicv", documents.primary.eicv);
 
       finalFamily.forEach((member, index) => {
         const memberDocuments = getFamilyDocuments(member.id);
         if (memberDocuments.ktp) formData.append(`keluarga_${index}_ktp`, memberDocuments.ktp);
+        if (memberDocuments.kk) formData.append(`keluarga_${index}_kk`, memberDocuments.kk);
         if (memberDocuments.paspor) formData.append(`keluarga_${index}_paspor`, memberDocuments.paspor);
         if (member.hasPasporHal4 && memberDocuments.pasporHal4) formData.append(`keluarga_${index}_paspor_hal4`, memberDocuments.pasporHal4);
         if (member.statusPaspor === 'PENDING' && memberDocuments.pasporHal4) formData.append(`keluarga_${index}_resi_paspor`, memberDocuments.pasporHal4);
+        if (memberDocuments.bpjs) formData.append(`keluarga_${index}_bpjs`, memberDocuments.bpjs);
+        if (memberDocuments.eicv) formData.append(`keluarga_${index}_eicv`, memberDocuments.eicv);
       });
 
       const response = await fetch("/api/register", {
@@ -496,11 +591,19 @@ export default function UmrahForm() {
 
   return (
     <div className="min-h-screen bg-slate-50 py-8 px-4 font-sans text-slate-800">
+      {isScanning && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 px-4 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-2xl border border-purple-100 bg-white p-6 text-center shadow-2xl shadow-slate-900/20">
+            <Loader2 className="mx-auto mb-4 h-10 w-10 animate-spin text-[#6D28D9]" />
+            <p className="text-lg font-bold text-slate-900">Passport sedang dipindai</p>
+          </div>
+        </div>
+      )}
       <div className="max-w-2xl mx-auto">
         
         {/* ================= HEADER MELAYANG (FLOATING) ================= */}
         <div className="text-center mb-8">
-          {projectName?.toLowerCase() === "tira" ? (
+          {isTiraProject ? (
             <div className="flex items-center justify-center space-x-3 sm:space-x-5 mb-6">
               <div className="w-32 h-16 sm:w-40 sm:h-20 flex items-center justify-center p-2 bg-white rounded-xl shadow-sm border border-slate-100 transition-all hover:shadow-md">
                 <img src="/logo-rida.png" alt="RiDATOUR" className="max-w-full max-h-full object-contain drop-shadow-sm" />
@@ -518,7 +621,7 @@ export default function UmrahForm() {
             </div>
           )}
           <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Form Pendaftaran Umroh</h1>
-          {projectName?.toLowerCase() === "tira" ? (
+            {isTiraProject ? (
             <p className="text-[#6D28D9] font-bold mt-3 bg-purple-100 inline-block px-5 py-1.5 rounded-full text-sm shadow-sm border border-purple-200">
               Program Khusus Tira Satria Niaga
             </p>
@@ -559,6 +662,39 @@ export default function UmrahForm() {
             {/* ================= STEP 1: DATA PENDAFTAR & KELUARGA (Kata-kata dari Form Baru) ================= */}
             {step === 1 && (
               <div className="space-y-8 animate-in slide-in-from-right-4 fade-in duration-300">
+                {isTiraProject && <div className="rounded-2xl border border-purple-200 bg-purple-50/70 p-5 space-y-5">
+                  <div>
+                    <h3 className="text-lg font-bold text-slate-900">Umroh RiDATOUR bersama Tira Satria Niaga</h3>
+                    <p className="text-sm font-semibold text-[#6D28D9] mt-1">Estimasi Keberangkatan 12 Agustus 2026</p>
+                  </div>
+
+                  <div className="rounded-xl bg-white/80 border border-purple-100 p-4 space-y-3 text-sm text-slate-700">
+                    <p className="font-bold text-slate-800">Informasi Kontak</p>
+                    <p>
+                      Informasi dan konfirmasi pengiriman Dokumen dan Perlengkapan Ibadah:{" "}
+                      <span className="font-semibold">Bpk Memed Meidi</span>{" "}
+                      <a className="font-bold text-[#6D28D9] hover:underline" href="https://wa.me/6281315588744?text=Assalamu%E2%80%99alaikum%20Pak%20Memed,%20Saya%20SFC%20-%20%5BNama%20SFC%5D,%20mau%20konfirmasi%20pengiriman%20Dokumen%20dan%20Perlengkapan%20Ibadah.%20" target="_blank" rel="noreferrer">+62 813-1558-8744</a>
+                    </p>
+                    <p>
+                      Informasi Program Keberangkatan:{" "}
+                      <span className="font-semibold">Mas Erik Julianto</span>{" "}
+                      <a className="font-bold text-[#6D28D9] hover:underline" href="https://wa.me/62818970910?text=Assalamu%E2%80%99alaikum%20Mas%20Erik,%20Saya%20%5BNama%20SFC/Nama%20Anda%5D,%20saya%20mau%20tanya%20untuk%20keberangkatan%20Umroh%20Tira%202026" target="_blank" rel="noreferrer">+62 818-970-910</a>
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-semibold text-slate-700 mb-2">Nama SFC</label>
+                      <input type="text" name="namaSfc" value={sfcInfo.namaSfc} onChange={handleSfcChange} className="w-full p-3 rounded-lg border border-purple-200 bg-white focus:ring-2 focus:ring-[#6D28D9] outline-none transition-all" placeholder="Tuliskan nama anda" />
+                      {errors.namaSfc && <span className="text-red-500 text-xs mt-1 flex items-center"><AlertCircle className="w-3 h-3 mr-1"/>{errors.namaSfc}</span>}
+                    </div>
+                    <div>
+                      <label className="block text-sm font-semibold text-slate-700 mb-2">No WhatsApp SFC</label>
+                      <input type="tel" name="whatsappSfc" value={sfcInfo.whatsappSfc} onChange={handleSfcChange} className="w-full p-3 rounded-lg border border-purple-200 bg-white focus:ring-2 focus:ring-[#6D28D9] outline-none transition-all" placeholder="Contoh: 08123456789" />
+                      {errors.whatsappSfc && <span className="text-red-500 text-xs mt-1 flex items-center"><AlertCircle className="w-3 h-3 mr-1"/>{errors.whatsappSfc}</span>}
+                    </div>
+                  </div>
+                </div>}
                 
                 {/* Blok Pendaftar Utama */}
                 <div className="space-y-4">
@@ -588,6 +724,11 @@ export default function UmrahForm() {
                       <label className="block text-sm font-medium text-slate-700 mb-1">Alamat Email</label>
                       <input type="email" name="email" value={primary.email} onChange={handlePrimaryChange} className="w-full p-3 rounded-lg border border-slate-300 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-[#6D28D9] focus:border-transparent outline-none transition-all" placeholder="Contoh: email@domain.com" />
                       {errors.email && <span className="text-red-500 text-xs mt-1 flex items-center"><AlertCircle className="w-3 h-3 mr-1"/>{errors.email}</span>}
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="block text-sm font-medium text-slate-700 mb-1">Kota Asal Peserta</label>
+                      <input type="text" name="kotaAsal" value={primary.kotaAsal} onChange={handlePrimaryChange} className="w-full p-3 rounded-lg border border-slate-300 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-[#6D28D9] focus:border-transparent outline-none transition-all" placeholder="Contoh: Bandung" />
+                      {errors.kotaAsal && <span className="text-red-500 text-xs mt-1 flex items-center"><AlertCircle className="w-3 h-3 mr-1"/>{errors.kotaAsal}</span>}
                     </div>
                   </div>
                 </div>
@@ -619,6 +760,11 @@ export default function UmrahForm() {
                             <label className="block text-sm font-medium text-slate-700 mb-1">Nama Lengkap</label>
                             <input type="text" value={member.namaLengkap} onChange={(e) => handleFamilyChange(member.id, 'namaLengkap', e.target.value)} className="w-full border border-slate-300 rounded-lg p-3 outline-none focus:ring-2 focus:ring-[#6D28D9] transition-all" placeholder="Nama sesuai KTP" />
                             {errors[`fam_${index}_namaLengkap`] && <span className="text-red-500 text-xs mt-1 flex items-center"><AlertCircle className="w-3 h-3 mr-1"/>{errors[`fam_${index}_namaLengkap`]}</span>}
+                          </div>
+                          <div className="md:col-span-2">
+                            <label className="block text-sm font-medium text-slate-700 mb-1">Kota Asal Peserta</label>
+                            <input type="text" value={member.kotaAsal || ""} onChange={(e) => handleFamilyChange(member.id, 'kotaAsal', e.target.value)} className="w-full border border-slate-300 rounded-lg p-3 outline-none focus:ring-2 focus:ring-[#6D28D9] transition-all" placeholder="Contoh: Bandung" />
+                            {errors[`fam_${index}_kotaAsal`] && <span className="text-red-500 text-xs mt-1 flex items-center"><AlertCircle className="w-3 h-3 mr-1"/>{errors[`fam_${index}_kotaAsal`]}</span>}
                           </div>
                           
                           {/* SAKLAR PASPOR KELUARGA */}
@@ -700,6 +846,16 @@ export default function UmrahForm() {
                     {errors.ktp && <p className="text-red-500 text-xs">{errors.ktp}</p>}
                   </div>
 
+                  {/* UPLOAD KK */}
+                  <div className="space-y-2">
+                    <label className="block text-sm font-semibold text-slate-700">Kartu Keluarga Utama</label>
+                    <label className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-2xl cursor-pointer transition-colors ${documents.primary.kk ? 'border-green-400 bg-green-50' : 'border-slate-300 bg-slate-50 hover:bg-slate-100'}`}>
+                      {documents.primary.kk ? <p className="text-sm text-green-700 font-medium px-4 text-center line-clamp-2">{documents.primary.kk.name}</p> : <><UploadCloud className="w-8 h-8 text-slate-400 mb-2" /><p className="text-sm text-slate-500">Upload Kartu Keluarga</p></>}
+                      <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => handleFileChange(e, 'kk')} />
+                    </label>
+                    {errors.kk && <p className="text-red-500 text-xs">{errors.kk}</p>}
+                  </div>
+
                   {/* UPLOAD PASPOR KONDISIONAL */}
                   {primary.statusPaspor === 'READY' ? (
                     <div className="space-y-2 animate-in fade-in duration-200">
@@ -726,6 +882,22 @@ export default function UmrahForm() {
                       <p className="text-[11px] text-slate-400 italic">*Langkah ini bisa dilewati jika belum melakukan wawancara/foto di kantor Imigrasi.</p>
                     </div>
                   )}
+
+                  <div className="space-y-2">
+                    <label className="block text-sm font-semibold text-slate-700">Kartu BPJS (Opsional)</label>
+                    <label className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-2xl cursor-pointer transition-colors ${documents.primary.bpjs ? 'border-green-400 bg-green-50' : 'border-slate-200 bg-slate-50/50 hover:bg-slate-100'}`}>
+                      {documents.primary.bpjs ? <p className="text-sm text-green-700 font-medium px-4 text-center line-clamp-2">{documents.primary.bpjs.name}</p> : <><FileText className="w-8 h-8 text-slate-300 mb-2" /><p className="text-sm text-slate-500">Upload BPJS</p></>}
+                      <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => handleFileChange(e, 'bpjs')} />
+                    </label>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="block text-sm font-semibold text-slate-700">Kartu e-ICV Meningitis (Opsional)</label>
+                    <label className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-2xl cursor-pointer transition-colors ${documents.primary.eicv ? 'border-green-400 bg-green-50' : 'border-slate-200 bg-slate-50/50 hover:bg-slate-100'}`}>
+                      {documents.primary.eicv ? <p className="text-sm text-green-700 font-medium px-4 text-center line-clamp-2">{documents.primary.eicv.name}</p> : <><FileText className="w-8 h-8 text-slate-300 mb-2" /><p className="text-sm text-slate-500">Upload e-ICV</p></>}
+                      <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => handleFileChange(e, 'eicv')} />
+                    </label>
+                  </div>
                 </div>
 
                 {/* KARTU VERIFIKASI DATA IDENTITAS */}
@@ -742,11 +914,16 @@ export default function UmrahForm() {
                       </div>
                       
                       {primary.statusPaspor === 'READY' && (
-                        <div className="grid grid-cols-2 gap-3 animate-in fade-in duration-150">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 animate-in fade-in duration-150">
                           <div>
                             <label className="block text-xs font-semibold text-slate-700 mb-1">Nomor Paspor</label>
                             <input type="text" name="noPaspor" value={primary.noPaspor} onChange={handlePrimaryChange} className="w-full p-2.5 rounded-lg border border-purple-200 outline-none text-sm uppercase tracking-wider font-medium" />
                             {errors.noPaspor && <p className="text-red-500 text-xs mt-0.5">{errors.noPaspor}</p>}
+                          </div>
+                          <div>
+                            <label className="block text-xs font-semibold text-slate-700 mb-1">Tanggal Terbit</label>
+                            <input type="date" name="pasporIssued" value={primary.pasporIssued || ""} onChange={handlePrimaryChange} className="w-full p-2.5 rounded-lg border border-purple-200 outline-none text-sm font-medium" />
+                            {errors.pasporIssued && <p className="text-red-500 text-xs mt-0.5">{errors.pasporIssued}</p>}
                           </div>
                           <div>
                             <label className="block text-xs font-semibold text-slate-700 mb-1">Tanggal Kedaluwarsa</label>
@@ -825,6 +1002,15 @@ export default function UmrahForm() {
                               {errors[`fam_${index}_ktp`] && <p className="text-red-500 text-xs">{errors[`fam_${index}_ktp`]}</p>}
                             </div>
 
+                            <div className="space-y-2">
+                              <label className="block text-sm font-semibold text-slate-700">Kartu Keluarga Anggota</label>
+                              <label className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-2xl cursor-pointer transition-colors ${memberDocuments.kk ? 'border-green-400 bg-green-50' : 'border-slate-300 bg-slate-50 hover:bg-slate-100'}`}>
+                                {memberDocuments.kk ? <p className="text-sm text-green-700 font-medium px-4 text-center line-clamp-2">{memberDocuments.kk.name}</p> : <><UploadCloud className="w-8 h-8 text-slate-400 mb-2" /><p className="text-sm text-slate-500">Upload Kartu Keluarga</p></>}
+                                <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => handleFileChange(e, 'kk', { owner: 'family', memberId: member.id, errorKey: `fam_${index}_kk` })} />
+                              </label>
+                              {errors[`fam_${index}_kk`] && <p className="text-red-500 text-xs">{errors[`fam_${index}_kk`]}</p>}
+                            </div>
+
                             {member.statusPaspor === 'READY' ? (
                               <div className="space-y-2">
                                 <label className="block text-sm font-semibold text-slate-700">Foto Paspor Anggota</label>
@@ -848,6 +1034,22 @@ export default function UmrahForm() {
                                 <p className="text-[11px] text-slate-400 italic">*Langkah ini bisa dilewati jika belum melakukan wawancara/foto di kantor Imigrasi.</p>
                               </div>
                             )}
+
+                            <div className="space-y-2">
+                              <label className="block text-sm font-semibold text-slate-700">Kartu BPJS (Opsional)</label>
+                              <label className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-2xl cursor-pointer transition-colors ${memberDocuments.bpjs ? 'border-green-400 bg-green-50' : 'border-slate-200 bg-slate-50/50 hover:bg-slate-100'}`}>
+                                {memberDocuments.bpjs ? <p className="text-sm text-green-700 font-medium px-4 text-center line-clamp-2">{memberDocuments.bpjs.name}</p> : <><FileText className="w-8 h-8 text-slate-300 mb-2" /><p className="text-sm text-slate-500">Upload BPJS</p></>}
+                                <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => handleFileChange(e, 'bpjs', { owner: 'family', memberId: member.id, errorKey: `fam_${index}_bpjs` })} />
+                              </label>
+                            </div>
+
+                            <div className="space-y-2">
+                              <label className="block text-sm font-semibold text-slate-700">Kartu e-ICV Meningitis (Opsional)</label>
+                              <label className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-2xl cursor-pointer transition-colors ${memberDocuments.eicv ? 'border-green-400 bg-green-50' : 'border-slate-200 bg-slate-50/50 hover:bg-slate-100'}`}>
+                                {memberDocuments.eicv ? <p className="text-sm text-green-700 font-medium px-4 text-center line-clamp-2">{memberDocuments.eicv.name}</p> : <><FileText className="w-8 h-8 text-slate-300 mb-2" /><p className="text-sm text-slate-500">Upload e-ICV</p></>}
+                                <input type="file" className="hidden" accept=".jpg,.jpeg,.png,.pdf" onChange={(e) => handleFileChange(e, 'eicv', { owner: 'family', memberId: member.id, errorKey: `fam_${index}_eicv` })} />
+                              </label>
+                            </div>
                           </div>
 
                           <div className="mt-5 bg-[#6D28D9]/5 border border-[#6D28D9]/20 rounded-2xl p-5 space-y-3">
@@ -862,11 +1064,16 @@ export default function UmrahForm() {
                             </div>
 
                             {member.statusPaspor === 'READY' && (
-                              <div className="grid grid-cols-2 gap-3">
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                                 <div>
                                   <label className="block text-xs font-semibold text-slate-700 mb-1">Nomor Paspor</label>
                                   <input type="text" value={member.noPaspor} onChange={(e) => handleFamilyChange(member.id, 'noPaspor', e.target.value)} className="w-full p-2.5 rounded-lg border border-purple-200 outline-none text-sm uppercase tracking-wider font-medium" />
                                   {errors[`fam_${index}_noPaspor`] && <p className="text-red-500 text-xs mt-0.5">{errors[`fam_${index}_noPaspor`]}</p>}
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-semibold text-slate-700 mb-1">Tanggal Terbit</label>
+                                  <input type="date" value={member.pasporIssued || ""} onChange={(e) => handleFamilyChange(member.id, 'pasporIssued', e.target.value)} className="w-full p-2.5 rounded-lg border border-purple-200 outline-none text-sm font-medium" />
+                                  {errors[`fam_${index}_pasporIssued`] && <p className="text-red-500 text-xs mt-0.5">{errors[`fam_${index}_pasporIssued`]}</p>}
                                 </div>
                                 <div>
                                   <label className="block text-xs font-semibold text-slate-700 mb-1">Tanggal Kedaluwarsa</label>
@@ -944,6 +1151,14 @@ export default function UmrahForm() {
                     ))}
                   </div>
                 </div>
+
+                {isTiraProject && <div className="rounded-2xl border border-purple-200 bg-purple-50/70 p-4 text-sm text-slate-700">
+                  <p className="font-bold text-slate-800 mb-2">Informasi SFC</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div><span className="text-slate-500">Nama SFC:</span> <span className="font-semibold text-slate-800">{sfcInfo.namaSfc || "-"}</span></div>
+                    <div><span className="text-slate-500">No WhatsApp SFC:</span> <span className="font-semibold text-slate-800">{sfcInfo.whatsappSfc || "-"}</span></div>
+                  </div>
+                </div>}
 
                 {allParticipants.map((participant, index) => (
                   <div key={participant.prefix} className="border border-slate-200 rounded-2xl p-5 bg-white shadow-sm">
@@ -1023,10 +1238,12 @@ export default function UmrahForm() {
                       <p className="text-sm font-bold text-slate-800 mb-3">Ringkasan Data Peserta</p>
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-sm">
                         <div><span className="text-slate-500">NIK:</span> <span className="font-semibold text-slate-800">{participant.nik || "-"}</span></div>
+                        <div><span className="text-slate-500">Kota asal:</span> <span className="font-semibold text-slate-800">{participant.kotaAsal || "-"}</span></div>
                         <div><span className="text-slate-500">Status paspor:</span> <span className="font-semibold text-slate-800">{participant.statusPaspor === 'READY' ? 'Sudah punya paspor' : 'Menyusul / sedang proses'}</span></div>
                         <div><span className="text-slate-500">No. paspor:</span> <span className="font-semibold text-slate-800">{participant.statusPaspor === 'READY' ? participant.noPaspor || "-" : "MENYUSUL"}</span></div>
-                        <div><span className="text-slate-500">Expired paspor:</span> <span className="font-semibold text-slate-800">{participant.statusPaspor === 'READY' ? participant.pasporExpired || "-" : "-"}</span></div>
-                        <div><span className="text-slate-500">Tanggal lahir:</span> <span className="font-semibold text-slate-800">{participant.tanggalLahir || "-"}</span></div>
+                        <div><span className="text-slate-500">Terbit paspor:</span> <span className="font-semibold text-slate-800">{participant.statusPaspor === 'READY' ? formatDateForDisplay(participant.pasporIssued) : "-"}</span></div>
+                        <div><span className="text-slate-500">Expired paspor:</span> <span className="font-semibold text-slate-800">{participant.statusPaspor === 'READY' ? formatDateForDisplay(participant.pasporExpired) : "-"}</span></div>
+                        <div><span className="text-slate-500">Tanggal lahir:</span> <span className="font-semibold text-slate-800">{formatDateForDisplay(participant.tanggalLahir)}</span></div>
                         <div><span className="text-slate-500">Jenis kelamin:</span> <span className="font-semibold text-slate-800">{participant.jenisKelamin || "-"}</span></div>
                         <div><span className="text-slate-500">Ukuran seragam:</span> <span className="font-semibold text-slate-800">{participant.ukuranSeragam ? `${participant.ukuranSeragam} (${getSizeDetail(participant.ukuranSeragam)})` : "-"}</span></div>
                         <div><span className="text-slate-500">Perlengkapan:</span> <span className="font-semibold text-slate-800">{getDeliveryLabel(participant.perlengkapanIbadah)}</span></div>
