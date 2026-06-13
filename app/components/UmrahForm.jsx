@@ -672,12 +672,12 @@ export default function UmrahForm() {
                     <p className="font-bold text-slate-800">Informasi Kontak</p>
                     <p>
                       Informasi dan konfirmasi pengiriman Dokumen dan Perlengkapan Ibadah:{" "}
-                      <span className="font-semibold">Bpk Memed Meidi</span>{" "}
+                      <span className="font-semibold">Memed Meidi</span>{" "}
                       <a className="font-bold text-[#6D28D9] hover:underline" href="https://wa.me/6281315588744?text=Assalamu%E2%80%99alaikum%20Pak%20Memed,%20Saya%20SFC%20-%20%5BNama%20SFC%5D,%20mau%20konfirmasi%20pengiriman%20Dokumen%20dan%20Perlengkapan%20Ibadah.%20" target="_blank" rel="noreferrer">+62 813-1558-8744</a>
                     </p>
                     <p>
                       Informasi Program Keberangkatan:{" "}
-                      <span className="font-semibold">Mas Erik Julianto</span>{" "}
+                      <span className="font-semibold">Erik Julianto</span>{" "}
                       <a className="font-bold text-[#6D28D9] hover:underline" href="https://wa.me/62818970910?text=Assalamu%E2%80%99alaikum%20Mas%20Erik,%20Saya%20%5BNama%20SFC/Nama%20Anda%5D,%20saya%20mau%20tanya%20untuk%20keberangkatan%20Umroh%20Tira%202026" target="_blank" rel="noreferrer">+62 818-970-910</a>
                     </p>
                   </div>
