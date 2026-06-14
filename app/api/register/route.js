@@ -1,7 +1,6 @@
+// app/api/register/route.js
 import { NextResponse } from "next/server";
-import { google } from "googleapis";
-import crypto from "crypto"; // Untuk ID_PENDAFTARAN_GRUP acak [38]
-import { Readable } from "node:stream";
+import crypto from "node:crypto";
 
 const MAX_FAMILY_MEMBERS = 4;
 const ACCEPTED_DOCUMENT_MIME_TYPES = new Set([
@@ -14,9 +13,10 @@ const ACCEPTED_DOCUMENT_EXTENSIONS = new Set([".jpg", ".jpeg", ".png", ".pdf"]);
 
 const deliveryLabel = (value) => {
   if (value === "DIKIRIM") return "Dikirim ke Alamat Tempat Tinggal";
-  if (value === "AMBIL_KANTOR") return "Diambil di Kantor RiDATOUR";
+  if (value === "AMBIL_KANTOR") return "Diambil di Kantor Travel";
   return "-";
 };
+
 const NAME_FILLER_NOISE = /^[CLKI]+$/;
 const NAME_OCR_FIXES = new Map([
   ["SERIK", "ERIK"],
@@ -71,7 +71,6 @@ const parsePrimaryParticipant = (formData) => {
   if (!isPlainObject(payload)) {
     throw new BadRequestError("Data pendaftar utama tidak ditemukan atau tidak valid.");
   }
-
   return normalizeParticipantData(payload);
 };
 
@@ -90,29 +89,6 @@ const parseFamilyParticipants = (formData) => {
   }
 
   return familyMembers;
-};
-
-const getGoogleSheetsId = () => {
-  const rawValue = process.env.GOOGLE_SHEETS_ID?.trim();
-  if (!rawValue) return "";
-
-  const urlMatch = rawValue.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-  if (urlMatch?.[1]) return urlMatch[1];
-
-  return rawValue.split(/[/?#]/)[0];
-};
-
-const getGoogleDriveFolderId = () => {
-  const rawValue = process.env.GOOGLE_DRIVE_FOLDER_ID?.trim();
-  if (!rawValue) return "";
-
-  const foldersMatch = rawValue.match(/\/folders\/([a-zA-Z0-9-_]+)/);
-  if (foldersMatch?.[1]) return foldersMatch[1];
-
-  const idParamMatch = rawValue.match(/[?&]id=([a-zA-Z0-9-_]+)/);
-  if (idParamMatch?.[1]) return idParamMatch[1];
-
-  return rawValue.split(/[/?#]/)[0];
 };
 
 const MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -138,13 +114,6 @@ const formatDateForSheet = (value) => {
 const isUploadedFile = (file) =>
   file && typeof file.arrayBuffer === "function" && typeof file.name === "string" && file.size > 0;
 
-const safeFileName = (value = "") =>
-  String(value)
-    .replace(/[^a-zA-Z0-9._ -]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim()
-    .slice(0, 120);
-
 const getFileExtension = (file) => {
   const fromName = file.name?.match(/\.[a-zA-Z0-9]+$/)?.[0];
   if (fromName) return fromName.toLowerCase();
@@ -165,65 +134,61 @@ const assertAcceptedDocumentFile = (file) => {
   }
 };
 
-const uploadFileToDrive = async (drive, file, { folderId, groupId, participantName, documentType }) => {
+// --- MOCK ENGINE: SIMULASI UPLOAD CLOUD TRANSSETTING ---
+const simulateUploadToDrive = async (file, label, docType) => {
   if (!isUploadedFile(file)) return "-";
-  if (!folderId) throw new Error("GOOGLE_DRIVE_FOLDER_ID belum dikonfigurasi.");
   assertAcceptedDocumentFile(file);
-
-  const buffer = Buffer.from(await file.arrayBuffer());
-  const extension = getFileExtension(file);
-  const nameParts = [
-    groupId,
-    documentType,
-    safeFileName(participantName || "PESERTA"),
-  ].filter(Boolean);
-
-  const response = await drive.files.create({
-    requestBody: {
-      name: `${nameParts.join(" - ")}${extension}`,
-      parents: [folderId],
-    },
-    media: {
-      mimeType: file.type || "application/octet-stream",
-      body: Readable.from(buffer),
-    },
-    fields: "id, webViewLink",
-  });
-
-  return response.data.webViewLink || `https://drive.google.com/file/d/${response.data.id}/view`;
+  
+  // Murni simulasi: Mengembalikan Virtual Link tiruan yang UU PDP Compliant
+  const mockFileId = crypto.randomBytes(8).toString("hex");
+  return `https://drive.google.com/mock-view/gdrive-portfolio-sandbox/${mockFileId}/${file.name}`;
 };
-
-const createDriveFolder = async (drive, { parentFolderId, folderName }) => {
-  if (!parentFolderId) throw new Error("GOOGLE_DRIVE_FOLDER_ID belum dikonfigurasi.");
-
-  const response = await drive.files.create({
-    requestBody: {
-      name: folderName,
-      mimeType: "application/vnd.google-apps.folder",
-      parents: [parentFolderId],
-    },
-    fields: "id",
-  });
-
-  return response.data.id;
-};
-
-const oauth2Client = new google.auth.OAuth2(
-  process.env.GOOGLE_CLIENT_ID,
-  process.env.GOOGLE_CLIENT_SECRET
-);
-oauth2Client.setCredentials({ refresh_token: process.env.GOOGLE_REFRESH_TOKEN }); // [38, 39]
 
 export async function POST(request) {
   try {
-    const formData = await request.formData(); // [40]
+    const formData = await request.formData();
+    const action = formData.get("action");
+
+    // =========================================================================
+    // SCENARIO 1: MOCK INTERCEPTOR UTK LASER AI OCR SCANNER (PASPOR STEP 3)
+    // =========================================================================
+    if (action === "ocr") {
+      const passportFile = formData.get("file");
+      if (!passportFile || !isUploadedFile(passportFile)) {
+        throw new BadRequestError("Berkas paspor tidak ditemukan untuk dipindai.");
+      }
+      assertAcceptedDocumentFile(passportFile);
+
+      // Beri efek jeda buatan (artificial delay) 1.8 detik agar terkesan AI sedang komputasi berat
+      await new Promise((resolve) => setTimeout(resolve, 1800));
+
+      // Kumpulan data simulasi ekstraksi MRZ paspor acak berkualitas tinggi
+      const mockDatabaseOCR = [
+        { namaLengkap: "ERIK JULIANTO DEMO", noPaspor: "X" + Math.floor(1000000 + Math.random() * 9000000), pasporExpired: "2032-08-17" },
+        { namaLengkap: "BUDI SANTOSO SANDBOX", noPaspor: "B" + Math.floor(1000000 + Math.random() * 9000000), pasporExpired: "2031-11-12" },
+        { namaLengkap: "SITI AMINAH PORTFOLIO", noPaspor: "A" + Math.floor(1000000 + Math.random() * 9000000), pasporExpired: "2033-05-20" }
+      ];
+
+      const selectedMock = mockDatabaseOCR[Math.floor(Math.random() * mockDatabaseOCR.length)];
+
+      return NextResponse.json({
+        success: true,
+        message: "Google Document AI Simulated Successfully (Transient Memory Mode)",
+        data: selectedMock
+      });
+    }
+
+    // =========================================================================
+    // SCENARIO 2: MOCK INTEGRASI UTK SUBMIT FINAL (GSHEETS & GDRIVE BYPASS)
+    // =========================================================================
     
-    // Parsing String JSON dari Frontend
+    // Tetap jalankan validasi & normalisasi data asli dari frontend untuk membuktikan keutuhan logic
     const pendaftarUtama = parsePrimaryParticipant(formData);
     const keluarga = parseFamilyParticipants(formData);
-    const projectPartner = formData.get("project_partner"); // [37]
+    const projectPartner = formData.get("project_partner") || "cobrand";
     const namaSfc = String(formData.get("nama_sfc") || "").trim() || "-";
     const whatsappSfc = String(formData.get("whatsapp_sfc") || "").trim() || "-";
+
     const utamaFiles = {
       ktp: formData.get("utama_ktp"),
       kk: formData.get("utama_kk"),
@@ -233,100 +198,40 @@ export async function POST(request) {
       bpjs: formData.get("utama_bpjs"),
       eicv: formData.get("utama_eicv"),
     };
+
     if (!isUploadedFile(utamaFiles.kk)) {
       throw new BadRequestError("Kartu Keluarga pendaftar utama wajib diupload.");
     }
 
-    // Generate ID Rombongan Unik
-    const ID_PENDAFTARAN_GRUP = `RIDA-${crypto.randomBytes(4).toString("hex")}`;
-    const WAKTU_DAFTAR = formatDateForSheet(new Date().toISOString()); // [37]
-    const driveFolderId = getGoogleDriveFolderId();
-    const drive = google.drive({ version: "v3", auth: oauth2Client });
-    const registrationFolderId = await createDriveFolder(drive, {
-      parentFolderId: driveFolderId,
-      folderName: ID_PENDAFTARAN_GRUP,
+    // Generate Meta Data internal tiruan
+    const ID_PENDAFTARAN_GRUP = `KianGroup-${crypto.randomBytes(4).toString("hex")}`;
+    const WAKTU_DAFTAR = formatDateForSheet(new Date().toISOString());
+
+    // Simulasi pengunggahan berkas biner pendaftar utama ke Google Drive virtual
+    const utamaFileLinks = {
+      ktp: await simulateUploadToDrive(utamaFiles.ktp, "PENDAFTAR UTAMA", "KTP"),
+      kk: await simulateUploadToDrive(utamaFiles.kk, "PENDAFTAR UTAMA", "KARTU KELUARGA"),
+      paspor: await simulateUploadToDrive(utamaFiles.paspor, "PENDAFTAR UTAMA", "PASPOR"),
+      pasporHal4: await simulateUploadToDrive(utamaFiles.pasporHal4, "PENDAFTAR UTAMA", "PASPOR HALAMAN 4"),
+      resiPaspor: await simulateUploadToDrive(utamaFiles.resiPaspor, "PENDAFTAR UTAMA", "RESI PASPOR"),
+      bpjs: await simulateUploadToDrive(utamaFiles.bpjs, "PENDAFTAR UTAMA", "BPJS"),
+      eicv: await simulateUploadToDrive(utamaFiles.eicv, "PENDAFTAR UTAMA", "E-ICV MENINGITIS"),
+    };
+
+    // Simulasi penyusunan baris data array yang siap ditembak ke Google Sheets Manifes asli
+    const simulatedSheetRows = [];
+    simulatedMockRowInsert(simulatedSheetRows, {
+      idGrup: ID_PENDAFTARAN_GRUP,
+      waktu: WAKTU_DAFTAR,
+      role: "Pendaftar Utama",
+      partner: projectPartner,
+      participant: pendaftarUtama,
+      links: utamaFileLinks,
+      sfcName: namaSfc,
+      sfcWa: whatsappSfc
     });
 
-    const uploadParticipantFiles = async (files, participant, label) => ({
-      ktp: await uploadFileToDrive(drive, files.ktp, {
-        folderId: registrationFolderId,
-        groupId: ID_PENDAFTARAN_GRUP,
-        participantName: participant.namaLengkap,
-        documentType: `${label} KTP`,
-      }),
-      kk: await uploadFileToDrive(drive, files.kk, {
-        folderId: registrationFolderId,
-        groupId: ID_PENDAFTARAN_GRUP,
-        participantName: participant.namaLengkap,
-        documentType: `${label} KARTU KELUARGA`,
-      }),
-      paspor: await uploadFileToDrive(drive, files.paspor, {
-        folderId: registrationFolderId,
-        groupId: ID_PENDAFTARAN_GRUP,
-        participantName: participant.namaLengkap,
-        documentType: `${label} PASPOR`,
-      }),
-      pasporHal4: await uploadFileToDrive(drive, files.pasporHal4, {
-        folderId: registrationFolderId,
-        groupId: ID_PENDAFTARAN_GRUP,
-        participantName: participant.namaLengkap,
-        documentType: `${label} PASPOR HALAMAN 4`,
-      }),
-      resiPaspor: await uploadFileToDrive(drive, files.resiPaspor, {
-        folderId: registrationFolderId,
-        groupId: ID_PENDAFTARAN_GRUP,
-        participantName: participant.namaLengkap,
-        documentType: `${label} RESI PASPOR`,
-      }),
-      bpjs: await uploadFileToDrive(drive, files.bpjs, {
-        folderId: registrationFolderId,
-        groupId: ID_PENDAFTARAN_GRUP,
-        participantName: participant.namaLengkap,
-        documentType: `${label} BPJS`,
-      }),
-      eicv: await uploadFileToDrive(drive, files.eicv, {
-        folderId: registrationFolderId,
-        groupId: ID_PENDAFTARAN_GRUP,
-        participantName: participant.namaLengkap,
-        documentType: `${label} E-ICV MENINGITIS`,
-      }),
-    });
-
-    const utamaFileLinks = await uploadParticipantFiles(utamaFiles, pendaftarUtama, "PENDAFTAR UTAMA");
-
-    const sheetValues = [];
-    
-    // Baris 1: Pendaftar Utama
-    sheetValues.push([
-      ID_PENDAFTARAN_GRUP,                 // A
-      WAKTU_DAFTAR,                        // B
-      "Pendaftar Utama",                   // C
-      projectPartner,                      // D
-      pendaftarUtama.whatsapp,             // E
-      pendaftarUtama.email || "-",         // F
-      pendaftarUtama.nik,                  // G
-      pendaftarUtama.namaLengkap,          // H
-      pendaftarUtama.kotaAsal || "-",      // I
-      pendaftarUtama.statusPaspor === 'READY' ? pendaftarUtama.noPaspor : "MENYUSUL", // J [18, 43]
-      pendaftarUtama.statusPaspor === 'READY' ? formatDateForSheet(pendaftarUtama.pasporIssued) : "-",   // K
-      pendaftarUtama.statusPaspor === 'READY' ? formatDateForSheet(pendaftarUtama.pasporExpired) : "-",   // L
-      formatDateForSheet(pendaftarUtama.tanggalLahir),  // M [44]
-      pendaftarUtama.jenisKelamin || "-",  // N
-      utamaFileLinks.ktp,                  // O
-      utamaFileLinks.paspor !== "-" ? utamaFileLinks.paspor : utamaFileLinks.resiPaspor, // P
-      utamaFileLinks.pasporHal4,           // Q
-      pendaftarUtama.ukuranSeragam || "-", // R
-      deliveryLabel(pendaftarUtama.perlengkapanIbadah), // S
-      pendaftarUtama.alamatPengiriman || "-",   // T
-      pendaftarUtama.kontakPengiriman || "-",   // U
-      namaSfc,                             // V
-      whatsappSfc,                         // W
-      utamaFileLinks.kk,                   // X
-      utamaFileLinks.bpjs,                 // Y
-      utamaFileLinks.eicv                  // Z
-    ]); // [36, 37, 45]
-
-    // Baris 2 - 5: Anggota Keluarga (Di-loop secara dinamis)
+    // Simulasi looping penanganan data dokumen & manifes baris keluarga
     for (const [index, anggota] of keluarga.entries()) {
       const anggotaFiles = {
         ktp: formData.get(`keluarga_${index}_ktp`),
@@ -337,72 +242,86 @@ export async function POST(request) {
         bpjs: formData.get(`keluarga_${index}_bpjs`),
         eicv: formData.get(`keluarga_${index}_eicv`),
       };
+
       if (!isUploadedFile(anggotaFiles.kk)) {
         throw new BadRequestError(`Kartu Keluarga anggota ${index + 1} wajib diupload.`);
       }
-      const anggotaFileLinks = await uploadParticipantFiles(
-        anggotaFiles,
-        anggota,
-        `ANGGOTA ${index + 1} ${anggota.hubungan || ""}`.trim()
-      );
 
-      sheetValues.push([
-        ID_PENDAFTARAN_GRUP,
-        WAKTU_DAFTAR,
-        anggota.hubungan,
-        projectPartner,
-        "-", // Kontak disamakan dengan utama
-        "-",
-        anggota.nik,
-        anggota.namaLengkap,
-        anggota.kotaAsal || "-",
-        anggota.statusPaspor === 'READY' ? anggota.noPaspor : "MENYUSUL", // [31, 35]
-        anggota.statusPaspor === 'READY' ? formatDateForSheet(anggota.pasporIssued) : "-",
-        anggota.statusPaspor === 'READY' ? formatDateForSheet(anggota.pasporExpired) : "-",
-        formatDateForSheet(anggota.tanggalLahir),
-        anggota.jenisKelamin || "-",
-        anggotaFileLinks.ktp,
-        anggotaFileLinks.paspor !== "-" ? anggotaFileLinks.paspor : anggotaFileLinks.resiPaspor,
-        anggotaFileLinks.pasporHal4,
-        anggota.ukuranSeragam || "-",
-        deliveryLabel(anggota.perlengkapanIbadah),
-        anggota.alamatPengiriman || "-",
-        anggota.kontakPengiriman || "-",
-        namaSfc,
-        whatsappSfc,
-        anggotaFileLinks.kk,
-        anggotaFileLinks.bpjs,
-        anggotaFileLinks.eicv
-      ]);
-    } // [37]
+      const labelAnggota = `ANGGOTA ${index + 1} ${anggota.hubungan || ""}`.trim();
+      const anggotaFileLinks = {
+        ktp: await simulateUploadToDrive(anggotaFiles.ktp, labelAnggota, "KTP"),
+        kk: await simulateUploadToDrive(anggotaFiles.kk, labelAnggota, "KARTU KELUARGA"),
+        paspor: await simulateUploadToDrive(anggotaFiles.paspor, labelAnggota, "PASPOR"),
+        pasporHal4: await simulateUploadToDrive(anggotaFiles.pasporHal4, labelAnggota, "PASPOR HALAMAN 4"),
+        resiPaspor: await simulateUploadToDrive(anggotaFiles.resiPaspor, labelAnggota, "RESI PASPOR"),
+        bpjs: await simulateUploadToDrive(anggotaFiles.bpjs, labelAnggota, "BPJS"),
+        eicv: await simulateUploadToDrive(anggotaFiles.eicv, labelAnggota, "E-ICV MENINGITIS"),
+      };
 
-    // Eksekusi Tembak ke GSheets
-    const spreadsheetId = getGoogleSheetsId();
-    if (!spreadsheetId) {
-      throw new Error("GOOGLE_SHEETS_ID belum dikonfigurasi.");
+      simulatedMockRowInsert(simulatedSheetRows, {
+        idGrup: ID_PENDAFTARAN_GRUP,
+        waktu: WAKTU_DAFTAR,
+        role: anggota.hubungan,
+        partner: projectPartner,
+        participant: anggota,
+        links: anggotaFileLinks,
+        sfcName: namaSfc,
+        sfcWa: whatsappSfc,
+        isFamily: true
+      });
     }
 
-    const sheets = google.sheets({ version: "v4", auth: oauth2Client });
-    await sheets.spreadsheets.values.append({
-      spreadsheetId,
-      range: "Sheet1!A:Z", // [46]
-      valueInputOption: "USER_ENTERED",
-      requestBody: { values: sheetValues },
+    // Beri artificial delay submit final selama 1.5 detik agar visual user experience spinner berputar indah
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+
+    // Cetak visual simulasi struktur data utuh di log console backend lokal lo buat bukti debugging portfolio
+    console.log("=== [SANDBOX MOCK REGISTRATION COMPLIANT UU PDP] ===");
+    console.log(`Generated Group ID: ${ID_PENDAFTARAN_GRUP}`);
+    console.log("Simulated Matrix Rows to spreadsheet Data:", JSON.stringify(simulatedSheetRows, null, 2));
+
+    return NextResponse.json({
+      success: true,
+      message: "Simulasi Berhasil! Seluruh berkas biner diuji-unggah secara virtual dan dipetakan ke memori transient (Regulasi UU PDP Terpenuhi).",
+      registrationId: ID_PENDAFTARAN_GRUP
     });
 
-    return NextResponse.json({ success: true, message: "Data tersimpan aman" });
   } catch (error) {
-    console.error("Register Submit Error:", {
-      name: error?.name,
-      message: error?.message,
-      status: error?.status,
-      code: error?.code,
-      response: error?.response?.data,
-    });
-    if (error instanceof BadRequestError) {
-      return NextResponse.json({ error: error.message }, { status: error.status });
-    }
-
-    return NextResponse.json({ error: "Terjadi kesalahan internal pada server." }, { status: 500 });
+    const status = error instanceof BadRequestError ? error.status : 500;
+    return NextResponse.json(
+      { success: false, error: error.message || "Internal Server Error di dalam Mock Sandbox." },
+      { status }
+    );
   }
+}
+
+// --- HELPER FUNCTION UNTUK MENYUNSUL STRUKTUR MATRIKS BARIS SHEET TIRUAN ---
+function simulatedMockRowInsert(targetArray, { idGrup, waktu, role, partner, participant, links, sfcName, sfcWa, isFamily = false }) {
+  targetArray.push([
+    idGrup,                                                                        // A
+    waktu,                                                                         // B
+    role,                                                                          // C
+    partner,                                                                       // D
+    isFamily ? "-" : (participant.whatsapp || "-"),                                // E
+    isFamily ? "-" : (participant.email || "-"),                                   // F
+    participant.nik || "-",                                                        // G
+    participant.namaLengkap,                                                       // H
+    participant.kotaAsal || "-",                                                   // I
+    participant.statusPaspor === 'READY' ? participant.noPaspor : "MENYUSUL",      // J
+    participant.statusPaspor === 'READY' ? formatDateForSheet(participant.pasporIssued) : "-",  // K
+    participant.statusPaspor === 'READY' ? formatDateForSheet(participant.pasporExpired) : "-", // L
+    formatDateForSheet(participant.tanggalLahir),                                  // M
+    participant.jenisKelamin || "-",                                               // N
+    links.ktp,                                                                     // O
+    links.paspor !== "-" ? links.paspor : links.resiPaspor,                        // P
+    links.pasporHal4,                                                              // Q
+    participant.ukuranSeragam || "-",                                              // R
+    deliveryLabel(participant.perlengkapanIbadah),                                 // S
+    participant.alamatPengiriman || "-",                                           // T
+    participant.kontakPengiriman || "-",                                           // U
+    sfcName,                                                                       // V
+    sfcWa,                                                                         // W
+    links.kk,                                                                      // X
+    links.bpjs,                                                                    // Y
+    links.eicv                                                                     // Z
+  ]);
 }

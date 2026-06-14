@@ -6,7 +6,7 @@ const interFont = Inter({ subsets: ["latin"] });
 
 export const metadata = {
   title: "Form Pendaftaran Umroh",
-  description: "Treat you like family - RiDATOUR",
+  description: "Seamless Form - Kian Simpul Makna",
   icons: {
     icon: "/favicon.ico",
     shortcut: "/favicon.ico",

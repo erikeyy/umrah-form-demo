@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { UploadCloud, CheckCircle2, AlertCircle, Plus, Trash2, ChevronRight, ChevronLeft, FileText, CheckSquare, Square, Scan, Loader2, ShieldCheck } from 'lucide-react';
 
+const [pdpAgreed, setPdpAgreed] = useState(false);
 const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15MB
 const ACCEPTED_FILE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'];
 const OCR_FILE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'];
@@ -20,7 +21,7 @@ const SERAGAM_OPTIONS = [
 ];
 const DELIVERY_OPTIONS = {
   DIKIRIM: 'Dikirim ke Alamat Tempat Tinggal',
-  AMBIL_KANTOR: 'Diambil di Kantor RiDATOUR',
+  AMBIL_KANTOR: 'Diambil di Kantor Travel Kami!',
 };
 const NAME_FILLER_NOISE = /^[CLKI]+$/;
 const NAME_OCR_FIXES = new Map([
@@ -140,7 +141,7 @@ const isValidPassport = (dateString) => {
 export default function UmrahForm() {
   const searchParams = useSearchParams();
   const projectName = searchParams.get('project-name') || 'Reguler';
-  const isTiraProject = projectName?.toLowerCase() === 'tira';
+  const isCoBrandProject = projectName?.toLowerCase() === 'cobrand';
 
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -363,8 +364,8 @@ export default function UmrahForm() {
 
   const validateStep1 = () => {
     const newErrors = {};
-    if (isTiraProject && !sfcInfo.namaSfc.trim()) newErrors.namaSfc = "Nama SFC wajib diisi";
-    if (isTiraProject && !/^(\+62|62|0)8[1-9][0-9]{6,10}$/.test(sfcInfo.whatsappSfc)) newErrors.whatsappSfc = "Format WA SFC tidak valid (Contoh: 0812...)";
+    if (isCoBrandProject && !sfcInfo.namaSfc.trim()) newErrors.namaSfc = "Nama SFC wajib diisi";
+    if (isCoBrandProject && !/^(\+62|62|0)8[1-9][0-9]{6,10}$/.test(sfcInfo.whatsappSfc)) newErrors.whatsappSfc = "Format WA SFC tidak valid (Contoh: 0812...)";
     if (!/^\d{16}$/.test(primary.nik)) newErrors.nik = "NIK wajib 16 digit angka";
     if (!/^(\+62|62|0)8[1-9][0-9]{6,10}$/.test(primary.whatsapp)) newErrors.whatsapp = "Format WA tidak valid (Contoh: 0812...)";
     if (!primary.kotaAsal.trim()) newErrors.kotaAsal = "Kota asal wajib diisi";
@@ -484,7 +485,7 @@ export default function UmrahForm() {
     try {
       const formData = new window.FormData(); 
       
-      const projectPartner = isTiraProject ? 'Tira Satria Niaga' : 'Reguler';
+      const projectPartner = isCoBrandProject ? 'Co Branding Project' : 'Reguler';
       formData.append("project_partner", projectPartner);
       formData.append("nama_sfc", sfcInfo.namaSfc.trim());
       formData.append("whatsapp_sfc", sfcInfo.whatsappSfc.trim());
@@ -577,8 +578,8 @@ export default function UmrahForm() {
           </div>
           <h2 className="text-3xl font-bold text-slate-800 mb-3">Pendaftaran Diterima!</h2>
           <p className="text-slate-600 mb-2">
-            Selamat! Anda telah bergabung menjadi Keluarga Besar RiDATOUR 
-            {projectName?.toLowerCase() === 'tira' && " dan Program Umroh Tira Satria Niaga"} Tahun 2026.
+            Selamat! Anda telah bergabung menjadi Keluarga Besar KianSimpulMakna 
+            {projectName?.toLowerCase() === 'cobrand' && " dan Program Umroh CoBrand Project"} Tahun 2026.
           </p>
           <p className="text-slate-500 text-sm mb-8">Terima kasih telah melakukan pendaftaran! Data Anda tersimpan dengan aman di database kami.</p>
           <button onClick={() => window.location.reload()} className="w-full py-4 bg-[#6D28D9] text-white font-bold rounded-xl hover:bg-[#5b21b6] transition-colors shadow-md">
@@ -603,27 +604,27 @@ export default function UmrahForm() {
         
         {/* ================= HEADER MELAYANG (FLOATING) ================= */}
         <div className="text-center mb-8">
-          {isTiraProject ? (
+          {isCoBrandProject ? (
             <div className="flex items-center justify-center space-x-3 sm:space-x-5 mb-6">
               <div className="w-32 h-16 sm:w-40 sm:h-20 flex items-center justify-center p-2 bg-white rounded-xl shadow-sm border border-slate-100 transition-all hover:shadow-md">
-                <img src="/logo-rida.png" alt="RiDATOUR" className="max-w-full max-h-full object-contain drop-shadow-sm" />
+                <img src="/logo-kiansimpulmakna.png" alt="KianSimpulMakna" className="max-w-full max-h-full object-contain drop-shadow-sm" />
               </div>
               <span className="text-slate-300 font-black text-xl sm:text-2xl">X</span>
               <div className="w-32 h-16 sm:w-40 sm:h-20 flex items-center justify-center p-2 bg-white rounded-xl shadow-sm border border-slate-100 transition-all hover:shadow-md">
-                <img src="/logo-tira.png" alt="Mitra Partner" className="max-w-full max-h-full object-contain drop-shadow-sm" />
+                <img src="/logo-cobrand.png" alt="Mitra Partner" className="max-w-full max-h-full object-contain drop-shadow-sm" />
               </div>
             </div>
           ) : (
             <div className="flex items-center justify-center mb-6">
               <div className="w-48 h-24 sm:w-56 sm:h-28 flex items-center justify-center p-3 bg-white rounded-2xl shadow-sm border border-slate-100 transition-all hover:shadow-md">
-                <img src="/logo-rida.png" alt="RiDATOUR" className="max-w-full max-h-full object-contain drop-shadow-md" />
+                <img src="/logo-kiansimpulmakna.png" alt="KianSimpulMakna" className="max-w-full max-h-full object-contain drop-shadow-md" />
               </div>
             </div>
           )}
           <h1 className="text-3xl font-bold text-slate-900 tracking-tight">Form Pendaftaran Umroh</h1>
-            {isTiraProject ? (
+            {isCoBrandProject ? (
             <p className="text-[#6D28D9] font-bold mt-3 bg-purple-100 inline-block px-5 py-1.5 rounded-full text-sm shadow-sm border border-purple-200">
-              Program Khusus Tira Satria Niaga
+              Program Khusus CoBrand Partner
             </p>
           ) : (
             <p className="text-[#eab308] font-medium mt-2">Treat you like family</p>
@@ -662,9 +663,9 @@ export default function UmrahForm() {
             {/* ================= STEP 1: DATA PENDAFTAR & KELUARGA (Kata-kata dari Form Baru) ================= */}
             {step === 1 && (
               <div className="space-y-8 animate-in slide-in-from-right-4 fade-in duration-300">
-                {isTiraProject && <div className="rounded-2xl border border-purple-200 bg-purple-50/70 p-5 space-y-5">
+                {isCoBrandProject && <div className="rounded-2xl border border-purple-200 bg-purple-50/70 p-5 space-y-5">
                   <div>
-                    <h3 className="text-lg font-bold text-slate-900">Umroh RiDATOUR bersama Tira Satria Niaga</h3>
+                    <h3 className="text-lg font-bold text-slate-900">Umroh Kian Simpul Makna bersama Pesona Anugerah</h3>
                     <p className="text-sm font-semibold text-[#6D28D9] mt-1">Estimasi Keberangkatan 12 Agustus 2026</p>
                   </div>
 
@@ -672,13 +673,13 @@ export default function UmrahForm() {
                     <p className="font-bold text-slate-800">Informasi Kontak</p>
                     <p>
                       Informasi dan konfirmasi pengiriman Dokumen dan Perlengkapan Ibadah:{" "}
-                      <span className="font-semibold">Memed Meidi</span>{" "}
-                      <a className="font-bold text-[#6D28D9] hover:underline" href="https://wa.me/6281315588744?text=Assalamu%E2%80%99alaikum%20Pak%20Memed,%20Saya%20SFC%20-%20%5BNama%20SFC%5D,%20mau%20konfirmasi%20pengiriman%20Dokumen%20dan%20Perlengkapan%20Ibadah.%20" target="_blank" rel="noreferrer">+62 813-1558-8744</a>
+                      <span className="font-semibold">Erik Julianto</span>{" "}
+                      <a className="font-bold text-[#6D28D9] hover:underline" href="https://wa.me/62818970910?text=Assalamu%E2%80%99alaikum%20Pak%20Memed,%20Saya%20SFC%20-%20%5BNama%20SFC%5D,%20mau%20konfirmasi%20pengiriman%20Dokumen%20dan%20Perlengkapan%20Ibadah.%20" target="_blank" rel="noreferrer">+62 818-970-10</a>
                     </p>
                     <p>
                       Informasi Program Keberangkatan:{" "}
                       <span className="font-semibold">Erik Julianto</span>{" "}
-                      <a className="font-bold text-[#6D28D9] hover:underline" href="https://wa.me/62818970910?text=Assalamu%E2%80%99alaikum%20Mas%20Erik,%20Saya%20%5BNama%20SFC/Nama%20Anda%5D,%20saya%20mau%20tanya%20untuk%20keberangkatan%20Umroh%20Tira%202026" target="_blank" rel="noreferrer">+62 818-970-910</a>
+                      <a className="font-bold text-[#6D28D9] hover:underline" href="https://wa.me/62818970910?text=Assalamu%E2%80%99alaikum%20Mas%20Erik,%20Saya%20%5BNama%20SFC/Nama%20Anda%5D,%20saya%20mau%20tanya%20untuk%20keberangkatan%20Umroh%20Oktober%202026" target="_blank" rel="noreferrer">+62 818-970-910</a>
                     </p>
                   </div>
 
@@ -1152,7 +1153,7 @@ export default function UmrahForm() {
                   </div>
                 </div>
 
-                {isTiraProject && <div className="rounded-2xl border border-purple-200 bg-purple-50/70 p-4 text-sm text-slate-700">
+                {isCoBrandProject && <div className="rounded-2xl border border-purple-200 bg-purple-50/70 p-4 text-sm text-slate-700">
                   <p className="font-bold text-slate-800 mb-2">Informasi SFC</p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <div><span className="text-slate-500">Nama SFC:</span> <span className="font-semibold text-slate-800">{sfcInfo.namaSfc || "-"}</span></div>
@@ -1268,6 +1269,25 @@ export default function UmrahForm() {
             )}
 
             {/* FOOTER NAVIGASI TOMBOL (Sesuai gaya form lama namun chunky) */}
+
+            {/* Blok Persetujuan UU PDP & Kebijakan Privasi */}
+            <div className="mt-6 p-4 rounded-xl border border-purple-100 bg-purple-50/50 backdrop-blur-sm">
+              <label className="flex items-start gap-3 cursor-pointer select-none">
+                <input 
+                  type="checkbox" 
+                  id="pdp-consent"
+                  className="mt-1 h-4 w-4 rounded border-gray-300 text-purple-600 focus:ring-purple-500 accent-purple-600"
+                  checked={pdpAgreed}
+                  onChange={(e) => setPdpAgreed(e.target.checked)}
+                />
+                <span className="text-xs text-slate-600 leading-relaxed">
+                  Saya memahami dan menyetujui bahwa formulir ini murni bersifat <strong className="text-purple-700">Simulasi Demo Portfolio</strong>. 
+                  Sesuai dengan amanat <span className="underline decoration-purple-400 font-medium">UU Pelindungan Data Pribadi (UU PDP)</span>, 
+                  sistem ini <strong>TIDAK AKAN MENYIMPAN</strong> dokumen, berkas, atau informasi apa pun yang saya unggah ke dalam database permanen server.
+                </span>
+              </label>
+            </div>
+
             <div className="mt-10 pt-6 border-t border-slate-100 flex items-center justify-between">
               {step > 1 ? (
                 <button type="button" onClick={prevStep} className="px-6 py-3 rounded-xl font-bold text-slate-600 hover:bg-slate-100 flex items-center transition-colors">
@@ -1280,8 +1300,16 @@ export default function UmrahForm() {
                   {step === 3 ? "Review Data" : "Lanjut"} <ChevronRight size={18} className="ml-1.5" />
                 </button>
               ) : (
-                <button type="button" onClick={onSubmit} disabled={isSubmitting || isScanning} className="px-8 py-3 bg-[#eab308] text-slate-900 font-bold tracking-wide rounded-xl hover:bg-[#dca507] shadow-md shadow-yellow-200 transition-all flex items-center disabled:opacity-70">
-                  {isSubmitting ? <><Loader2 size={18} className="mr-2 animate-spin" /> Memproses...</> : <><CheckCircle2 size={18} className="mr-2" /> Kirim Pendaftaran</>}
+                <button
+                  type="submit"
+                  disabled={!pdpAgreed || isSubmitting}
+                  className={`w-full py-3 px-4 rounded-xl font-bold text-white transition-all duration-200 ${
+                    pdpAgreed && !isSubmitting
+                      ? 'bg-purple-600 hover:bg-purple-700 shadow-md shadow-purple-200 active:scale-[0.98]'
+                      : 'bg-slate-300 cursor-not-allowed'
+                  }`}
+                >
+                  {isSubmitting ? 'Memproses Simulasi...' : 'Kirim Pendaftaran (Demo Mode)'}
                 </button>
               )}
             </div>
