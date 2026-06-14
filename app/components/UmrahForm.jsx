@@ -127,6 +127,7 @@ export default function UmrahForm() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [isSuccess, setIsSuccess] = useState(false);
+  const [registrationId, setRegistrationId] = useState('');
 
   // Step gating & validation dibuat non-menghalangi (demo rules)
   const [errors, setErrors] = useState({});
@@ -376,10 +377,10 @@ export default function UmrahForm() {
       const projectPartner = isCoBrandProject ? 'Co Branding Project' : 'Reguler';
       formData.append('project_partner', projectPartner);
 
-      // SFC inputs dihapus dari UI, namun endpoint /api/register tetap menunggu field nama_sfc & whatsapp_sfc.
-      // Karena requirement melarang input/state SFC dipaksa user, isi dengan placeholder aman.
-      formData.append('nama_sfc', '-');
-      formData.append('whatsapp_sfc', '-');
+      // Sales inputs dihapus dari UI, namun endpoint /api/register tetap menunggu field nama_Sales & whatsapp_Sales.
+      // Karena requirement melarang input/state Sales dipaksa user, isi dengan placeholder aman.
+      formData.append('nama_Sales', '-');
+      formData.append('whatsapp_Sales', '-');
 
       const finalPrimary = normalizeParticipantData(primary);
       const finalFamily = family.filter(isParticipantObject).slice(0, MAX_FAMILY_MEMBERS).map(normalizeParticipantData);
@@ -419,6 +420,7 @@ export default function UmrahForm() {
       const result = await readApiResponse(response, 'Gagal mengirim pendaftaran ke server.');
       if (!response.ok) throw new Error(result.error || 'Gagal mengirim pendaftaran ke server.');
 
+      setRegistrationId(result?.registrationId || '');
       setIsSuccess(true);
     } catch (err) {
       setErrorMsg(err.message || 'Koneksi bermasalah, silakan coba beberapa saat lagi.');
@@ -454,14 +456,32 @@ export default function UmrahForm() {
           <div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-6">
             <CheckCircle2 size={40} />
           </div>
-          <h2 className="text-3xl font-bold text-slate-800 mb-3">Pendaftaran Diterima!</h2>
-          <p className="text-slate-600 mb-2">
-            Selamat! Anda telah bergabung menjadi Keluarga Besar KianSimpulMakna{' '}
-            {projectName?.toLowerCase() === 'cobrand' && ' dan Program Umroh CoBrand Project'} Tahun 2026.
+          <h2 className="text-3xl font-black text-slate-900 uppercase tracking-tight">Terima Kasih!</h2>
+
+          {/* Narasi Edukatif Portfolio Berbasis Regulasi UU PDP */}
+          <p className="mt-4 text-xs text-slate-700 leading-relaxed text-left p-5 rounded-2xl bg-purple-50/70 border-2 border-purple-100 font-medium space-y-2">
+            Sistem mendeteksi bahwa saat ini Anda sedang mengakses formulir dalam <strong className="text-purple-700 font-bold">Live Demo Mode</strong>.
+            <br /><br />
+            Apabila sistem ini berjalan pada lingkungan produksi asli (Live), seluruh informasi, data manifes, serta berkas biner jamaah yang diunggah akan <strong className="text-purple-700 font-bold">otomatis tersimpan secara real-time ke dalam database internal Anda</strong> (Google Sheets & Google Drive otomatis).
+            <br /><br />
+            Namun, demi mematuhi regulasi ketat <span className="underline decoration-purple-400 font-bold">UU Pelindungan Data Pribadi (UU PDP)</span>, data dan berkas dokumen yang Anda simulasikan saat ini <strong>TIDAK AKAN DISIMPAN</strong> ke dalam database permanen kami dan murni diproses secara transient (sementara) hanya untuk keperluan demonstrasi portfolio.
           </p>
-          <p className="text-slate-500 text-sm mb-8">Terima kasih telah melakukan pendaftaran! Data Anda tersimpan dengan aman di database kami.</p>
-          <button onClick={() => window.location.reload()} className="w-full py-4 bg-[#6D28D9] text-white font-bold rounded-xl hover:bg-[#5b21b6] transition-colors shadow-md">
-            Selesai
+
+          <div className="my-6 p-4 bg-slate-100 border-2 border-slate-900 p-3 rounded-2xl inline-block w-full">
+            <span className="text-[10px] font-black text-slate-500 uppercase block tracking-wider mb-0.5">Simulated Group ID Generated</span>
+            <span className="text-xl font-mono font-black text-purple-900 tracking-tight">{registrationId}</span>
+          </div>
+
+          <button
+            onClick={() => {
+              setIsSuccess(false);
+              setStep(1);
+              setPdpAgreed(false);
+              setRegistrationId('');
+            }}
+            className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl border-b-4 border-slate-950 transition-all active:translate-y-1 uppercase tracking-wider text-xs"
+          >
+            Kembali ke Formulir Demo
           </button>
         </div>
       </div>
@@ -561,7 +581,7 @@ export default function UmrahForm() {
             {/* ================= STEP 1 ================= */}
             {step === 1 && (
               <div className="space-y-8 animate-in slide-in-from-right-4 fade-in duration-300">
-                {/* RETAIN UPPER HEADER CONTACT CARD (SFC UI removed) */}
+                {/* RETAIN UPPER HEADER CONTACT CARD (Sales UI removed) */}
                 {isCoBrandProject && (
                   <div className="rounded-2xl border border-purple-200 bg-purple-50/70 p-5 space-y-5">
                     <div>
@@ -576,7 +596,7 @@ export default function UmrahForm() {
                         <span className="font-semibold">Erik Julianto</span>{' '}
                         <a
                           className="font-bold text-[#6D28D9] hover:underline"
-                          href="https://wa.me/62818970910?text=Assalamu%E2%80%99alaikum%20Pak%20Memed,%20Saya%20SFC%20-%20%5BNama%20SFC%5D,%20mau%20konfirmasi%20pengiriman%20Dokumen%20dan%20Perlengkapan%20Ibadah.%20"
+                          href="https://wa.me/62818970910?text=Assalamu%E2%80%99alaikum%20Pak%20Memed,%20Saya%20Sales%20-%20%5BNama%20Sales%5D,%20mau%20konfirmasi%20pengiriman%20Dokumen%20dan%20Perlengkapan%20Ibadah.%20"
                           target="_blank"
                           rel="noreferrer"
                         >
@@ -588,7 +608,7 @@ export default function UmrahForm() {
                         <span className="font-semibold">Erik Julianto</span>{' '}
                         <a
                           className="font-bold text-[#6D28D9] hover:underline"
-                          href="https://wa.me/62818970910?text=Assalamu%E2%80%99alaikum%20Mas%20Erik,%20Saya%20%5BNama%20SFC/Nama%20Anda%5D,%20saya%20mau%20tanya%20untuk%20keberangkatan%20Umroh%20Oktober%202026"
+                          href="https://wa.me/62818970910?text=Assalamu%E2%80%99alaikum%20Mas%20Erik,%20Saya%20%5BNama%20Sales/Nama%20Anda%5D,%20saya%20mau%20tanya%20untuk%20keberangkatan%20Umroh%20Oktober%202026"
                           target="_blank"
                           rel="noreferrer"
                         >
@@ -1387,16 +1407,16 @@ export default function UmrahForm() {
                   </div>
                 </div>
 
-                {/* Review SFC - card kept but without internal inputs */}
+                {/* Review Sales - card kept but without internal inputs */}
                 {isCoBrandProject && (
                   <div className="rounded-2xl border border-purple-200 bg-purple-50/70 p-4 text-sm text-slate-700">
-                    <p className="font-bold text-slate-800 mb-2">Informasi SFC</p>
+                    <p className="font-bold text-slate-800 mb-2">Informasi SALES</p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <div>
-                        <span className="text-slate-500">Nama SFC:</span> <span className="font-semibold text-slate-800">-</span>
+                        <span className="text-slate-500">Nama SALES:</span> <span className="font-semibold text-slate-800">-</span>
                       </div>
                       <div>
-                        <span className="text-slate-500">No WhatsApp SFC:</span> <span className="font-semibold text-slate-800">-</span>
+                        <span className="text-slate-500">No WhatsApp SALES:</span> <span className="font-semibold text-slate-800">-</span>
                       </div>
                     </div>
                   </div>

@@ -186,8 +186,8 @@ export async function POST(request) {
     const pendaftarUtama = parsePrimaryParticipant(formData);
     const keluarga = parseFamilyParticipants(formData);
     const projectPartner = formData.get("project_partner") || "cobrand";
-    const namaSfc = String(formData.get("nama_sfc") || "").trim() || "-";
-    const whatsappSfc = String(formData.get("whatsapp_sfc") || "").trim() || "-";
+    const namaSales = String(formData.get("nama_Sales") || "").trim() || "-";
+    const whatsappSales = String(formData.get("whatsapp_Sales") || "").trim() || "-";
 
     const utamaFiles = {
       ktp: formData.get("utama_ktp"),
@@ -227,8 +227,8 @@ export async function POST(request) {
       partner: projectPartner,
       participant: pendaftarUtama,
       links: utamaFileLinks,
-      sfcName: namaSfc,
-      sfcWa: whatsappSfc
+      SalesName: namaSales,
+      SalesWa: whatsappSales
     });
 
     // Simulasi looping penanganan data dokumen & manifes baris keluarga
@@ -265,8 +265,8 @@ export async function POST(request) {
         partner: projectPartner,
         participant: anggota,
         links: anggotaFileLinks,
-        sfcName: namaSfc,
-        sfcWa: whatsappSfc,
+        SalesName: namaSales,
+        SalesWa: whatsappSales,
         isFamily: true
       });
     }
@@ -295,7 +295,7 @@ export async function POST(request) {
 }
 
 // --- HELPER FUNCTION UNTUK MENYUNSUL STRUKTUR MATRIKS BARIS SHEET TIRUAN ---
-function simulatedMockRowInsert(targetArray, { idGrup, waktu, role, partner, participant, links, sfcName, sfcWa, isFamily = false }) {
+function simulatedMockRowInsert(targetArray, { idGrup, waktu, role, partner, participant, links, SalesName, SalesWa, isFamily = false }) {
   targetArray.push([
     idGrup,                                                                        // A
     waktu,                                                                         // B
@@ -318,8 +318,8 @@ function simulatedMockRowInsert(targetArray, { idGrup, waktu, role, partner, par
     deliveryLabel(participant.perlengkapanIbadah),                                 // S
     participant.alamatPengiriman || "-",                                           // T
     participant.kontakPengiriman || "-",                                           // U
-    sfcName,                                                                       // V
-    sfcWa,                                                                         // W
+    SalesName,                                                                       // V
+    SalesWa,                                                                         // W
     links.kk,                                                                      // X
     links.bpjs,                                                                    // Y
     links.eicv                                                                     // Z
