@@ -4,7 +4,9 @@ import React, { useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { UploadCloud, CheckCircle2, AlertCircle, Plus, Trash2, ChevronRight, ChevronLeft, FileText, CheckSquare, Square, Scan, Loader2, ShieldCheck } from 'lucide-react';
 
-const [pdpAgreed, setPdpAgreed] = useState(false);
+// =========================================================================
+// 1. LINGKUP GLOBAL (FUNGSI HELPER & KONSTANTA - TIDAK BOLEH ADA HOOKS DI SINI)
+// =========================================================================
 const MAX_FILE_SIZE = 15 * 1024 * 1024; // 15MB
 const ACCEPTED_FILE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'];
 const OCR_FILE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'];
@@ -52,18 +54,8 @@ const normalizeParticipantData = (participant) => ({
 });
 
 const MONTH_INDEX = {
-  jan: '01',
-  feb: '02',
-  mar: '03',
-  apr: '04',
-  may: '05',
-  jun: '06',
-  jul: '07',
-  aug: '08',
-  sep: '09',
-  oct: '10',
-  nov: '11',
-  dec: '12',
+  jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+  jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12',
 };
 
 const toHtmlDateValue = (value = "") => {
@@ -96,7 +88,7 @@ const normalizePassportReaderData = (data = {}) => ({
   noPaspor: data.passportNumber || data.noPaspor || "",
   pasporIssued: toHtmlDateValue(data.issueDate || data.pasporIssued),
   pasporExpired: toHtmlDateValue(data.expiryDate || data.pasporExpired),
-  tanggalLahir: toHtmlDateValue(data.dateOfBirth || data.tanggalLahir),
+  tanggalLahir: data.dateOfBirth || data.tanggalLahir,
   jenisKelamin: data.gender || data.jenisKelamin || "",
   tempatLahir: data.placeOfBirth || data.tempatLahir || "",
 });
@@ -106,7 +98,6 @@ const isParticipantObject = (value) =>
 
 const readApiResponse = async (response, fallbackMessage) => {
   const contentType = response.headers.get("content-type") || "";
-
   if (contentType.includes("application/json")) {
     try {
       return await response.json();
@@ -114,22 +105,10 @@ const readApiResponse = async (response, fallbackMessage) => {
       throw new Error(fallbackMessage);
     }
   }
-
   const bodyText = await response.text().catch(() => "");
-  console.error("Unexpected non-JSON response:", {
-    status: response.status,
-    contentType,
-    bodyPreview: bodyText.slice(0, 200),
-  });
-
-  throw new Error(
-    response.status === 413
-      ? "Ukuran total file terlalu besar untuk server. Kompres dokumen atau upload file yang lebih kecil."
-      : fallbackMessage
-  );
+  throw new Error(response.status === 413 ? "Ukuran file terlalu besar." : fallbackMessage);
 };
 
-// Fungsi Validasi Masa Berlaku Paspor
 const isValidPassport = (dateString) => {
   if (!dateString) return false;
   const selectedDate = new Date(dateString);
@@ -138,10 +117,17 @@ const isValidPassport = (dateString) => {
   return selectedDate > sixMonthsFromNow;
 };
 
+
+// =========================================================================
+// 2. TUBUH UTAMA KOMPONEN (TEMPAT REAK HOOKS BERSEMALAM)
+// =========================================================================
 export default function UmrahForm() {
   const searchParams = useSearchParams();
   const projectName = searchParams.get('project-name') || 'Reguler';
   const isCoBrandProject = projectName?.toLowerCase() === 'cobrand';
+
+  // 🔥 STATE PDP AGREE SEKARANG SUDAH BERADA DI POSISI YANG BENAR
+  const [pdpAgreed, setPdpAgreed] = useState(false);
 
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -151,6 +137,8 @@ export default function UmrahForm() {
     namaSfc: '',
     whatsappSfc: '',
   });
+  
+  // ... sisa state dan fungsional handler di bawahnya tetap aman
 
   // State Jemaah Utama (Sesuai Form Baru)
   const [primary, setPrimary] = useState({
@@ -627,7 +615,7 @@ export default function UmrahForm() {
               Program Khusus CoBrand Partner
             </p>
           ) : (
-            <p className="text-[#eab308] font-medium mt-2">Treat you like family</p>
+            <p className="text-[#eab308] font-medium mt-2">TRUSTED IS US . TRAVEL THE WORLD</p>
           )}
         </div>
 
